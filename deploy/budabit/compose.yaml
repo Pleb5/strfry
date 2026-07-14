@@ -1,0 +1,67 @@
+name: budabit-strfry
+
+services:
+  relay:
+    image: budabit/strfry:b80cda3
+    pull_policy: build
+    build:
+      context: ../..
+      dockerfile: deploy/budabit/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7777:7777"
+    volumes:
+      - type: bind
+        source: ${STRFRY_DATA_DIR:-/var/lib/strfry/db}
+        target: /var/lib/strfry/db
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${STRFRY_CONFIG_FILE:-./strfry.conf}
+        target: /etc/strfry.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      STRFRY_CONFIG: /etc/strfry.conf
+      STRFRY_POLICY_DB_FILE: /var/lib/strfry/db/data.mdb
+      STRFRY_POLICY_MAX_DB_BYTES: "${STRFRY_POLICY_MAX_DB_BYTES:-10737418240}"
+      STRFRY_POLICY_MIN_FREE_BYTES: "${STRFRY_POLICY_MIN_FREE_BYTES:-26843545600}"
+      STRFRY_POLICY_PUBKEY_CAPACITY: "30"
+      STRFRY_POLICY_PUBKEY_RATE_PER_MINUTE: "2"
+      STRFRY_POLICY_IP_CAPACITY: "100"
+      STRFRY_POLICY_IP_RATE_PER_MINUTE: "10"
+      STRFRY_POLICY_GLOBAL_CAPACITY: "200"
+      STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE: "20"
+      STRFRY_POLICY_MAX_TRACKED_PUBKEYS: "10000"
+      STRFRY_POLICY_MAX_TRACKED_SOURCES: "4096"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1280m
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://127.0.0.1:7777/
+          && /usr/local/lib/strfry/write-policy.py --check-storage
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

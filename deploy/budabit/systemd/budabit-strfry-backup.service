@@ -1,0 +1,11 @@
+[Unit]
+Description=Export and rotate the Budabit strfry database
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/strfry/deploy/budabit/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

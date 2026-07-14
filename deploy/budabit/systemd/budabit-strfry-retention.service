@@ -1,0 +1,11 @@
+[Unit]
+Description=Prune old regular events from Budabit strfry
+Requires=docker.service budabit-strfry-backup.service
+After=docker.service budabit-strfry-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/strfry/deploy/budabit/retention.py --apply --days 365
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

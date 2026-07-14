@@ -1,0 +1,10 @@
+relay.budabit.club {
+	route {
+		@metrics path /metrics
+		respond @metrics 404
+
+		reverse_proxy 127.0.0.1:7777 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}
