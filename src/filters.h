@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "golpe.h"
 
 #include "jsonParseUtils.h"
@@ -34,7 +35,7 @@ struct FilterSetBytes : NonCopyable {
         for (size_t i = 0; i < arr.size(); i++) {
             const auto &item = arr[i];
             if (i > 0 && item == arr[i - 1]) continue; // remove duplicates
-            items.emplace_back(Item{ (uint16_t)buf.size(), (uint8_t)item.size(), (uint8_t)item[0] });
+            items.emplace_back(Item{ (uint16_t)buf.size(), (uint8_t)item.size(), item.empty() ? (uint8_t)0 : (uint8_t)item[0] });
             buf += item;
         }
 
@@ -306,27 +307,7 @@ struct FilterValidator : NonCopyable {
     flat_hash_set<uint64_t> allowedKinds;
 
     void setupValidator() {
-        allowedKinds.clear();
-
-        std::string allowedKindsStr = cfg().relay__filterValidation__allowedKinds;
-
-        if (!allowedKindsStr.empty()) {
-            size_t pos = 0;
-            while (pos < allowedKindsStr.size()) {
-                size_t nextComma = allowedKindsStr.find(',', pos);
-                if (nextComma == std::string::npos) nextComma = allowedKindsStr.size();
-
-                std::string kindStr = allowedKindsStr.substr(pos, nextComma - pos);
-                size_t start = kindStr.find_first_not_of(" \t");
-                size_t end = kindStr.find_last_not_of(" \t");
-                if (start != std::string::npos && end != std::string::npos) {
-                    kindStr = kindStr.substr(start, end - start + 1);
-                    if (!kindStr.empty()) allowedKinds.insert(std::stoull(kindStr));
-                }
-
-                pos = nextComma + 1;
-            }
-        }
+       parseCommaSeparatedKinds(cfg().relay__filterValidation__allowedKinds, allowedKinds);
     }
 
     void validate(const NostrFilterGroup &fg) {

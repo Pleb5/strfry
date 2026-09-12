@@ -1,60 +1,24 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { buildEvent } from "./events.js";
+import { buildEvent } from "../utils/events.js";
+import { cleanDb, addEvent, runStrfry, writeConfig, config } from "../utils/relay.js";
+import ids from "../utils/dummyIds.json" with { type: "json" };
 
-let ids = [
-  {
-    sec: "c1eee22f68dc218d98263cfecb350db6fc6b3e836b47423b66c62af7ae3e32bb",
-    pub: "003ba9b2c5bd8afeed41a4ce362a8b7fc3ab59c25b6a1359cae9093f296dac01",
-  },
-  {
-    sec: "a0b459d9ff90e30dc9d1749b34c4401dfe80ac2617c7732925ff994e8d5203ff",
-    pub: "cc49e2a58373abc226eee84bee9ba954615aa2ef1563c4f955a74c4606a3b1fa",
-  },
-];
-
-function addEvent(evInput) {
-  const event = buildEvent(evInput);
-
-  spawnSync(
-    "./strfry",
-    ["--config", "test/cfgs/writeTest.conf", "import", "--no-verify"],
-    {
-      input: JSON.stringify(event) + "\n",
-      encoding: "utf-8",
-      stdio: ["pipe", "ignore", "ignore"],
-    },
-  );
-
-  if (process.env.DUMP_EVENTS) {
-    console.log(event);
-  }
-
-  return event.id;
-}
-
-function cleanDb() {
-  const dir = path.join(process.cwd(), "strfry-db-test");
-  const file = path.join(dir, "data.mdb");
-  mkdirSync(dir, { recursive: true });
-  rmSync(file, { force: true });
-}
+const workDir = path.join(os.tmpdir(), "strfry-tests");
+const dbDir = path.join(workDir, "relay-db");
+const cfgPath = path.join(workDir, "writeTest.conf");
 
 function doTest(spec) {
   console.log("*", spec.desc || "unnamed");
 
-  cleanDb();
+  cleanDb(dbDir);
+  writeConfig(config(dbDir), cfgPath);
 
   const eventIds = [];
 
   for (const ev of spec.events) {
-    ev.pub = ev.from === 1 ? ids[1].pub : ids[0].pub;
-    ev.sec = ev.from === 1 ? ids[1].sec : ids[0].sec;
-
-    // deep clone
-    const e = JSON.parse(JSON.stringify(ev));
-
     const replaceEV = (v) => {
       if (typeof v === "string") {
         return v.replace(/EV_(\d+)/g, (_, i) => eventIds[Number(i)]);
@@ -66,9 +30,9 @@ function doTest(spec) {
       return v;
     };
 
-    replaceEV(e);
+    replaceEV(ev);
 
-    const id = addEvent(e);
+    const id = addEvent(cfgPath, ev).id;
     eventIds.push(id);
   }
 
@@ -80,11 +44,7 @@ function doTest(spec) {
     }
   }
 
-  const result = spawnSync(
-    "./strfry",
-    ["--config", "test/cfgs/writeTest.conf", "export"],
-    { encoding: "utf-8" },
-  );
+  const result = runStrfry(["--config", cfgPath, "export"]);
 
   if (result.error) throw result.error;
 
@@ -108,6 +68,7 @@ function doTest(spec) {
 const d = (v) => ["d", v];
 const e = (v) => ["e", v];
 const a = (v) => ["a", v];
+const p = (v) => ["p", v];
 
 doTest({
   desc: "Basic insert",
@@ -542,6 +503,94 @@ doTest({
       content: "hi",
       kind: 30003,
       created_at: 5000,
+    },
+  ],
+  verify: [1],
+});
+
+// ---- NIP-59 GIFT WRAP TESTS ----
+
+doTest({
+  desc: "Gift wrap recipient can delete",
+  events: [
+    {
+      content: "wrapped",
+      kind: 1059,
+      created_at: 5000,
+      tags: [p(ids[1].pub)],
+    },
+    {
+      from: 1,
+      content: "",
+      kind: 5,
+      created_at: 6000,
+      tags: [e("EV_0")],
+    },
+  ],
+  verify: [1],
+});
+
+doTest({
+  desc: "Gift wrap deletion prevents re-add",
+  events: [
+    {
+      content: "wrapped",
+      kind: 1059,
+      created_at: 5000,
+      tags: [p(ids[1].pub)],
+    },
+    {
+      from: 1,
+      content: "",
+      kind: 5,
+      created_at: 6000,
+      tags: [e("EV_0")],
+    },
+    {
+      content: "wrapped",
+      kind: 1059,
+      created_at: 5000,
+      tags: [p(ids[1].pub)],
+    },
+  ],
+  verify: [1],
+});
+
+doTest({
+  desc: "Non-recipient can't delete gift wrap",
+  events: [
+    {
+      content: "wrapped",
+      kind: 1059,
+      created_at: 5000,
+      tags: [p(ids[1].pub)],
+    },
+    {
+      from: 2,
+      content: "",
+      kind: 5,
+      created_at: 6000,
+      tags: [e("EV_0")],
+    },
+  ],
+  verify: [0, 1],
+});
+
+doTest({
+  desc: "Ephemeral gift wrap (21059) recipient can delete",
+  events: [
+    {
+      content: "wrapped",
+      kind: 21059,
+      created_at: 5000,
+      tags: [p(ids[1].pub)],
+    },
+    {
+      from: 1,
+      content: "",
+      kind: 5,
+      created_at: 6000,
+      tags: [e("EV_0")],
     },
   ],
   verify: [1],

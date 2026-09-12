@@ -1,7 +1,8 @@
-*
-!deploy/
-deploy/*
-!deploy/budabit/
-deploy/budabit/*
-!deploy/budabit/Dockerfile
-!deploy/budabit/write-policy.py
+.vscode/
+.cache/
+build/
+strfry
+*.md
+*.Dockerfile
+Dockerfile
+.gitignore

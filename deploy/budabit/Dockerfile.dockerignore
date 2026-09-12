@@ -1,0 +1,7 @@
+*
+!deploy/
+deploy/*
+!deploy/budabit/
+deploy/budabit/*
+!deploy/budabit/Dockerfile
+!deploy/budabit/write-policy.py
