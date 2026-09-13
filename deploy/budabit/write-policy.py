@@ -85,11 +85,13 @@ def replay(policy, path, authority="lmdb+export"):
     """Offline evaluation of a JSONL export against the community policy only.
 
     Rate limits and the storage guard are not applied; they depend on live
-    traffic and would dominate any sizeable export. Authority state comes from
-    the relay's LMDB (warm-up scan) when the loader is enabled, and the export
-    is replayed in created_at order so authority events it contains take
-    effect for the events that follow them, exactly as they would inline.
-    With ``authority="export"`` LMDB is not consulted.
+    traffic and would dominate any sizeable export. Authority state is built
+    first and completely -- from the relay's LMDB when the loader is enabled
+    and ``authority="lmdb+export"``, then from every authority event in the
+    export -- and only then is each non-authority event evaluated against
+    that final state. This matches the client's current-grant model and
+    audit.py: a shard published before the definition that references it
+    still counts. With ``authority="export"`` LMDB is not consulted.
 
     Prints one JSON line per event that would be rejected and a summary of
     decisions by reason on stderr.
@@ -105,8 +107,20 @@ def replay(policy, path, authority="lmdb+export"):
         events = [json.loads(line) for line in handle if line.strip()]
     events.sort(key=lambda e: (e.get("created_at", 0), e.get("id", "")))
 
+    # Two passes: definitions first so that shard coordinates exist, then all
+    # authority kinds in order so deletions and replacements resolve.
+    for event in events:
+        if event.get("kind") == rules.P.COMMUNITY_DEFINITION_KIND:
+            stage.state.apply(event)
+    for event in events:
+        if event.get("kind") in rules.AUTHORITY_KINDS:
+            stage.state.apply(event)
+
     counts = {}
     for event in events:
+        if event.get("kind") in rules.AUTHORITY_KINDS:
+            counts["skipped:authority"] = counts.get("skipped:authority", 0) + 1
+            continue
         raw = {
             "type": "new",
             "event": event,
@@ -118,10 +132,7 @@ def replay(policy, path, authority="lmdb+export"):
         outcome = rules.evaluate(request.event, stage.state, stage.config)
         key = f"{outcome.decision.action}:{outcome.scope}:{outcome.reason}"
         counts[key] = counts.get(key, 0) + 1
-        if outcome.accepted:
-            if outcome.authority:
-                stage.state.apply(request.event)
-        else:
+        if not outcome.accepted:
             print(
                 json.dumps(
                     {
