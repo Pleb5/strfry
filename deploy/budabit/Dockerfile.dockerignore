@@ -5,3 +5,6 @@ deploy/*
 deploy/budabit/*
 !deploy/budabit/Dockerfile
 !deploy/budabit/write-policy.py
+!deploy/budabit/policy/
+!deploy/budabit/policy/**
+deploy/budabit/policy/**/__pycache__/

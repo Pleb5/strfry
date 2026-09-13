@@ -24,6 +24,7 @@ services:
           create_host_path: false
     environment:
       STRFRY_CONFIG: /etc/strfry.conf
+      PYTHONDONTWRITEBYTECODE: "1"
       STRFRY_POLICY_DB_FILE: /var/lib/strfry/db/data.mdb
       STRFRY_POLICY_MAX_DB_BYTES: "${STRFRY_POLICY_MAX_DB_BYTES:-10737418240}"
       STRFRY_POLICY_MIN_FREE_BYTES: "${STRFRY_POLICY_MIN_FREE_BYTES:-26843545600}"
@@ -35,6 +36,16 @@ services:
       STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE: "20"
       STRFRY_POLICY_MAX_TRACKED_PUBKEYS: "10000"
       STRFRY_POLICY_MAX_TRACKED_SOURCES: "4096"
+      # Budabit community write control (deploy/budabit/WRITE-CONTROL-PLAN.md).
+      # Comma-separated exact 32222:<owner>:<communityId> addresses; empty disables the stage.
+      BUDABIT_BRANCHES: "${BUDABIT_BRANCHES:-}"
+      # passthrough (public relay, hosted communities enforced) or strict (community-only relay)
+      BUDABIT_MODE: "${BUDABIT_MODE:-passthrough}"
+      # 1 = log would-be rejections but accept everything (rollout)
+      BUDABIT_DRY_RUN: "${BUDABIT_DRY_RUN:-0}"
+      BUDABIT_REJECT_CENSORED_ADDRESSES: "${BUDABIT_REJECT_CENSORED_ADDRESSES:-0}"
+      BUDABIT_RECONCILE_SECONDS: "${BUDABIT_RECONCILE_SECONDS:-300}"
+      BUDABIT_STRFRY_BIN: /usr/local/bin/strfry
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -55,8 +66,9 @@ services:
         - >-
           wget -q -O /dev/null http://127.0.0.1:7777/
           && /usr/local/lib/strfry/write-policy.py --check-storage
+          && /usr/local/lib/strfry/write-policy.py --check-policy
       interval: 30s
-      timeout: 5s
+      timeout: 20s
       retries: 3
       start_period: 15s
     stop_grace_period: 30s

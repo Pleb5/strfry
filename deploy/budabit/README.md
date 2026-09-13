@@ -29,6 +29,31 @@ The write-policy plugin applies per-pubkey, per-source, and global token
 buckets. It rejects writes when `data.mdb` reaches 10 GiB or when the database
 filesystem has less than 25 GiB available.
 
+## Community write control
+
+The plugin is a pipeline (`policy/`): storage guard, then Budabit community
+write control, then rate limits. The Budabit stage is inert until
+`BUDABIT_BRANCHES` names one or more exact `32222:<owner>:<communityId>`
+definition addresses. For those branches it rejects community-scoped writes
+the Budabit client would not admit: authors without a current section grant,
+effectively person-banned authors, and structurally invalid Communikeys V2
+events. Everything else passes through (or is rejected in `BUDABIT_MODE=strict`).
+
+State is rebuilt from the relay's own LMDB with `strfry scan` at start and
+every `BUDABIT_RECONCILE_SECONDS`, and updated inline from every accepted
+definition, profile-list shard, report, and deletion, so a grant published to
+this relay takes effect for the very next write.
+
+Design, semantics, and rollout: [WRITE-CONTROL-PLAN.md](WRITE-CONTROL-PLAN.md).
+Operations: [RUNBOOK.md](RUNBOOK.md#community-write-control).
+
+Tests (from the repository root):
+
+```sh
+python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
+node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
+```
+
 ## Retention
 
 Normal events older than 365 days are deleted monthly. Current replaceable

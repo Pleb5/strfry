@@ -71,12 +71,14 @@ The deployment bundle contains:
 | `Dockerfile` | Pinned-source non-root strfry image |
 | `compose.yaml` | Runtime isolation, limits, mounts, and health check |
 | `strfry.conf` | Relay protocol and resource configuration |
-| `write-policy.py` | Write-rate and storage admission policy |
+| `write-policy.py` | Write-policy entrypoint: storage guard, Budabit community write control, rate limits |
+| `policy/` | Policy stages; `policy/budabit/` implements Communikeys V2 write control |
+| `WRITE-CONTROL-PLAN.md` | Design and rollout plan for community write control |
 | `backup.sh` | Logical export, validation metadata, and rotation |
 | `retention.py` | One-year pruning while preserving replaceable events |
 | `Caddyfile` | TLS/WebSocket reverse-proxy host block |
 | `systemd/` | Backup and retention services and timers |
-| `test_*.py` | Policy and retention regression tests |
+| `tests/` | Policy, write-control, and retention regression tests |
 
 ## Image provenance
 
@@ -211,6 +213,64 @@ The policy fails closed when it cannot inspect the database or filesystem. The
 container health check covers both the HTTP endpoint and the policy storage
 check, so a relay that can serve reads but cannot safely write becomes
 unhealthy.
+
+### Community write control
+
+The Budabit stage of the write policy enforces Communikeys V2 grants for the
+branches listed in `BUDABIT_BRANCHES` (see `WRITE-CONTROL-PLAN.md`). It is
+disabled when that variable is empty; the relay then behaves exactly as
+before.
+
+Configuration lives in `compose.yaml` and is read from the shell environment
+or an `.env` file next to it:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BUDABIT_BRANCHES` | empty | Comma-separated exact `32222:<owner>:<communityId>` addresses to enforce. |
+| `BUDABIT_MODE` | `passthrough` | `passthrough` keeps the public-write relay; `strict` rejects anything not attributable to a hosted community. |
+| `BUDABIT_DRY_RUN` | `0` | `1` accepts everything but logs `would_reject` decisions. Use for rollout. |
+| `BUDABIT_REJECT_CENSORED_ADDRESSES` | `0` | Reject replacements at addresses censored by an effective event report. |
+| `BUDABIT_RECONCILE_SECONDS` | `300` | Background reconcile interval against LMDB. |
+
+Rollout order for a branch:
+
+1. Verify the definition and every referenced `kind:30000` shard are stored on
+   this relay: `docker compose -f deploy/budabit/compose.yaml exec relay
+   /usr/local/lib/strfry/write-policy.py --status`. Missing shards are also
+   logged as `shard_missing`; republish them from the Budabit admin panel.
+2. Set `BUDABIT_BRANCHES` with `BUDABIT_DRY_RUN=1`, restart the relay, and
+   watch `would_reject` lines for at least a week. Compare against what the
+   Budabit client hides.
+3. Set `BUDABIT_DRY_RUN=0` and restart.
+
+Rejections are plain NIP-01 `OK false` replies with stable prefixes:
+`blocked:` (policy), `invalid:` (Communikeys grammar), `rate-limited:`,
+`error:` (transient; `error: relay policy is loading` during warm-up after a
+plugin start or reload). The plugin logs one JSON line per rejection and per
+state change (`definition_updated`, `shard_updated`, `report_added`,
+`report_deleted`, `definition_deleted`, `shard_deleted`) to the container log.
+
+Health: the compose health check runs `--check-policy`, which fails when a
+configured branch has no valid definition on this relay or the loader hit an
+error. `--status` prints per-branch state as JSON.
+
+Offline replay of a JSONL export against the current rules:
+
+```bash
+sudo docker compose -f deploy/budabit/compose.yaml exec -T relay \
+  /usr/local/lib/strfry/write-policy.py --replay /dev/stdin < events.jsonl
+```
+
+To roll back, clear `BUDABIT_BRANCHES` and restart. Nothing stored is removed;
+the stage only gates new writes.
+
+Deletion requests and NIP-09: strfry treats every `a` tag on a `kind:5` as
+a deletion target. Budabit therefore scopes community deletes with `h` only
+and never with the marked branch `a` (`Communikeys.md`, "Deletion
+Requests"). A client that still sends the old shape will see its
+retractions rejected ("can't delete other user's events") or, for the
+owner, will tombstone the community definition; publish a fresh definition
+with a newer `created_at` to recover.
 
 ### Query limits
 
@@ -661,6 +721,13 @@ the timer prevented a silent backup failure.
 ## Outstanding work
 
 - Add the administrator `npub` and contact field to NIP-11 metadata.
+- Advertise enforced branches in NIP-11 (plan §3.7) once strfry supports an
+  info extension or Caddy serves a static document.
+- Bump `STRFRY_COMMIT` in `Dockerfile` to a revision that includes the
+  Communikeys context a-tag change in `src/events.cpp` before enabling
+  `BUDABIT_BRANCHES` in production.
+- Run the Budabit-side golden vector export (plan §8.2) and commit the vectors
+  under `deploy/budabit/tests/vectors/`.
 - Add privacy and terms URLs if the relay becomes a community production service.
 - Perform a signed publish and read-back test; read and Negentropy tests passed.
 - Configure an external HTTPS/WebSocket uptime monitor.

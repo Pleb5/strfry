@@ -49,8 +49,12 @@ RUN apk add --no-cache \
 
 COPY --from=build /build/strfry /usr/local/bin/strfry
 COPY deploy/budabit/write-policy.py /usr/local/lib/strfry/write-policy.py
+COPY deploy/budabit/policy /usr/local/lib/strfry/policy
 
-RUN chmod 0555 /usr/local/bin/strfry /usr/local/lib/strfry/write-policy.py
+RUN chmod 0555 /usr/local/bin/strfry /usr/local/lib/strfry/write-policy.py \
+    && find /usr/local/lib/strfry/policy -type d -exec chmod 0555 {} + \
+    && find /usr/local/lib/strfry/policy -type f -exec chmod 0444 {} + \
+    && rm -rf /usr/local/lib/strfry/policy/__pycache__ /usr/local/lib/strfry/policy/budabit/__pycache__
 
 USER 10001:10001
 WORKDIR /var/lib/strfry
