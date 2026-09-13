@@ -25,6 +25,16 @@ node "./test/tests/readRestrictTest.js" \
   && pass "./test/tests/readRestrictTest.js" \
   || fail "./test/tests/readRestrictTest.js failed"
 
+info "running budabit write-control plugin tests..."
+
+python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p "test_*.py" \
+  && pass "deploy/budabit/tests" \
+  || fail "deploy/budabit/tests failed"
+
+node "./test/tests/budabitPolicyTest.js" \
+  && pass "./test/tests/budabitPolicyTest.js" \
+  || fail "./test/tests/budabitPolicyTest.js failed"
+
 info "Seeding events..."
 
 perl "./test/utils/generate-seed-data.pl" -o - | ./strfry --config ./test/cfgs/test.conf import --no-verify

@@ -10,6 +10,11 @@ Tests should be run from the *root* of the project.
 
     node test/readRestrictTest.js
 
+## Budabit write-control plugin (deploy/budabit):
+
+    python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
+    node test/tests/budabitPolicyTest.js
+
 ## Fuzz tests
 
 Note that these tests need a well populated DB. For best coverage, use the [wellordered 500k](https://wiki.wellorder.net/wiki/nostr-datasets/) data-set:
