@@ -111,6 +111,19 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
             if (cfg().relay__info__privacy.size()) nip11["privacy_policy"] = cfg().relay__info__privacy;
             if (cfg().relay__info__terms.size()) nip11["terms_of_service"] = cfg().relay__info__terms;
 
+            if (cfg().relay__info__extra.size()) {
+                try {
+                    auto extra = tao::json::from_string(cfg().relay__info__extra);
+                    if (!extra.is_object()) throw herr("not an object");
+                    for (auto &[k, v] : extra.get_object()) {
+                        if (nip11.find(k)) continue; // operator-supplied extras never override generated fields
+                        nip11[k] = v;
+                    }
+                } catch (std::exception &e) {
+                    LE << "Unable to parse config param relay.info.extra, ignoring: " << e.what();
+                }
+            }
+
             rendered = preGenerateHttpResponse("application/json", tao::json::to_string(nip11));
             ver = cfg().version();
         }
