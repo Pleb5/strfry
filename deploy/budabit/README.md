@@ -42,7 +42,13 @@ events. Everything else passes through (or is rejected in `BUDABIT_MODE=strict`)
 State is rebuilt from the relay's own LMDB with `strfry scan` at start and
 every `BUDABIT_RECONCILE_SECONDS`, and updated inline from every accepted
 definition, profile-list shard, report, and deletion, so a grant published to
-this relay takes effect for the very next write.
+this relay takes effect for the very next write. `BUDABIT_AUTO_HOST_URL`
+additionally hosts every valid definition that names this relay.
+
+Conformance with the Budabit client is pinned by golden vectors exported
+from the client's own permission code (`tests/vectors/`). `audit.py` replays
+stored content against the rules; `sweep.py` deletes what an audit lists.
+`write-policy.py --nip11-extra` produces the NIP-11 advertisement.
 
 Design, semantics, and rollout: [WRITE-CONTROL-PLAN.md](WRITE-CONTROL-PLAN.md).
 Operations: [RUNBOOK.md](RUNBOOK.md#community-write-control).

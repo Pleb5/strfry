@@ -73,6 +73,8 @@ The deployment bundle contains:
 | `strfry.conf` | Relay protocol and resource configuration |
 | `write-policy.py` | Write-policy entrypoint: storage guard, Budabit community write control, rate limits |
 | `policy/` | Policy stages; `policy/budabit/` implements Communikeys V2 write control |
+| `audit.py` | Read-only replay of stored community content against the current rules |
+| `sweep.py` | Deletes audit-listed events (person-banned authors by default) |
 | `WRITE-CONTROL-PLAN.md` | Design and rollout plan for community write control |
 | `backup.sh` | Logical export, validation metadata, and rotation |
 | `retention.py` | One-year pruning while preserving replaceable events |
@@ -231,6 +233,7 @@ or an `.env` file next to it:
 | `BUDABIT_DRY_RUN` | `0` | `1` accepts everything but logs `would_reject` decisions. Use for rollout. |
 | `BUDABIT_REJECT_CENSORED_ADDRESSES` | `0` | Reject replacements at addresses censored by an effective event report. |
 | `BUDABIT_RECONCILE_SECONDS` | `300` | Background reconcile interval against LMDB. |
+| `BUDABIT_AUTO_HOST_URL` | empty | Auto-host: enforce every valid `kind:32222` whose `r` tags name this URL, in addition to `BUDABIT_BRANCHES`. Branches are unhosted again when their current definition stops naming the relay. |
 
 Rollout order for a branch:
 
@@ -253,6 +256,34 @@ state change (`definition_updated`, `shard_updated`, `report_added`,
 Health: the compose health check runs `--check-policy`, which fails when a
 configured branch has no valid definition on this relay or the loader hit an
 error. `--status` prints per-branch state as JSON.
+
+NIP-11: advertise enforcement so clients and auditors can see it. Generate
+the value with `write-policy.py --nip11-extra` and paste it into
+`relay.info.extra` in `strfry.conf` (a JSON object merged into the relay
+information document; generated fields are never overridden). Re-run when
+`BUDABIT_BRANCHES` changes. Auto-hosted branches are not listed statically;
+the `auto_host` field names the relay URL instead.
+
+Audit and sweep (read-only unless `--apply`):
+
+```bash
+# what the current rules would reject among stored community content
+sudo docker compose -f deploy/budabit/compose.yaml exec -T relay \
+  python3 /usr/local/lib/strfry/audit.py > audit.json
+
+# dry run: content by effectively person-banned authors
+sudo python3 /opt/strfry/deploy/budabit/sweep.py audit.json
+
+# delete it, refusing unless a backup newer than 30 h exists
+sudo python3 /opt/strfry/deploy/budabit/sweep.py audit.json --apply \
+  --require-recent-backup /mnt/HC_Volume_105751807/backups/strfry/daily
+```
+
+`sweep.py` deletes only `person_banned` content unless other reason codes
+are named with `--reasons`. Removing `no_grant` content diverges from
+Budabit's "regrant refetches history" model and removing censored events
+removes the client's "Moderated event" placeholder; do that only on explicit
+community request.
 
 Offline replay of a JSONL export against the community policy only (rate
 limits and the storage guard are not applied; authority comes from LMDB plus
@@ -725,13 +756,17 @@ the timer prevented a silent backup failure.
 ## Outstanding work
 
 - Add the administrator `npub` and contact field to NIP-11 metadata.
-- Advertise enforced branches in NIP-11 (plan §3.7) once strfry supports an
-  info extension or Caddy serves a static document.
+- Set `relay.info.extra` from `write-policy.py --nip11-extra` when enabling
+  enforcement, and keep it in sync with `BUDABIT_BRANCHES`.
 - The plugin needs no strfry core change; `STRFRY_COMMIT` in `Dockerfile`
   may stay at the deployed revision. Bump it deliberately when taking newer
   upstream fixes, following the upgrade procedure above.
-- Run the Budabit-side golden vector export (plan §8.2) and commit the vectors
-  under `deploy/budabit/tests/vectors/`.
+- Regenerate `deploy/budabit/tests/vectors/budabit-policy-vectors.json` from
+  Budabit (`POLICY_VECTORS_OUT=... pnpm exec vitest run
+  src/app/core/community-policy-vectors.test.ts`) whenever the client's
+  permission rules change; the file records the Budabit commit it came from.
+- Strict-mode NIP-34 repository attribution is not implemented; strict mode
+  passes NIP-34 kinds through.
 - Add privacy and terms URLs if the relay becomes a community production service.
 - Perform a signed publish and read-back test; read and Negentropy tests passed.
 - Configure an external HTTPS/WebSocket uptime monitor.

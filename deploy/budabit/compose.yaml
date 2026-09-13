@@ -39,6 +39,9 @@ services:
       # Budabit community write control (deploy/budabit/WRITE-CONTROL-PLAN.md).
       # Comma-separated exact 32222:<owner>:<communityId> addresses; empty disables the stage.
       BUDABIT_BRANCHES: "${BUDABIT_BRANCHES:-}"
+      # Auto-host: also enforce every valid kind 32222 definition whose r tags name this
+      # relay. Leave empty to enforce only BUDABIT_BRANCHES.
+      BUDABIT_AUTO_HOST_URL: "${BUDABIT_AUTO_HOST_URL:-}"
       # passthrough (public relay, hosted communities enforced) or strict (community-only relay)
       BUDABIT_MODE: "${BUDABIT_MODE:-passthrough}"
       # 1 = log would-be rejections but accept everything (rollout)

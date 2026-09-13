@@ -1,12 +1,12 @@
 # Budabit write-control plugin for strfry — implementation plan
 
-Status: phases 0–2 implemented on branch `feat/budabit-write-control`
-(`deploy/budabit/policy/`, tests under `deploy/budabit/tests/`, integration
-test `test/tests/budabitPolicyTest.js`). Phase 3 (Budabit-side vector export,
-NIP-11 advertisement, production rollout), 4 (strict-mode NIP-34 attribution,
-audit/sweep tools) and 5 (auto-host, spec amendment) are open. Target:
-`deploy/budabit/` on the Pleb5 strfry fork (`master`, which tracks upstream
-`hoytech/strfry` master).
+Status: implemented on branch `feat/budabit-write-control` through phase 5
+with two exceptions: strict-mode NIP-34 repository attribution (§3.6, phase
+4) is deferred, and the client-side fetch-profile change that would consume
+an owner-signed enforcement declaration (§3.7 option 2, phase 5) is
+proposed in the docs but not implemented. The production dry-run rollout
+(§6) is an operational step. Target: `deploy/budabit/` on the Pleb5 strfry
+fork (`master`, which tracks upstream `hoytech/strfry` master).
 
 Implementation note discovered during phase 1: strfry treats every `a`
 tag on a `kind:5` as an NIP-09 target and rejects the event when the
@@ -271,14 +271,37 @@ In strict mode (`BUDABIT_MODE=strict`) passthrough traffic is rejected with
 ### 3.7 Declaring enforcement (spec gap)
 
 The V1 marker `["r", url, "enforced"]` is invalid under V2 (`r` arity is
-exactly two). Options, in order of preference:
+exactly two). Two complementary declarations:
 
-1. **NIP-11 (relay-claimed).** Serve `"budabit": {"enforced_branches": ["32222:…"], "policy_version": "1"}` in the relay information document. strfry's NIP-11 is generated from `relay.info` and has no extension hook, so this either needs a small strfry change (`relay.info.extra` JSON merged into the document) or a Caddy rule serving a static document for `Accept: application/nostr+json`. Recommended: strfry config extension (tiny, upstreamable).
-2. **Definition-level (owner-signed) declaration** as a new top-level tag, e.g. `["enforced-relay", "wss://relay.example"]`, which V2 readers ignore and editors preserve byte-for-byte. Requires a Communikeys V2 amendment and a Budabit client change before the client may drop `authors` filters. Not part of this plan's phases; tracked as a follow-up in Budabit.
+1. **NIP-11 (relay-claimed), implemented.** strfry gained
+   `relay.info.extra`, a JSON object merged into the relay information
+   document without overriding generated fields. `write-policy.py
+   --nip11-extra` emits
+   `{"budabit": {"policy_version": "1", "mode": "passthrough|strict",
+   "enforced_branches": ["32222:…"], "auto_host": "wss://…"}}` for the
+   current configuration. This is an operator claim, useful for discovery
+   and auditing, not a trust input.
+2. **Definition-level (owner-signed) declaration, proposed.** A new
+   top-level definition tag that V2 readers ignore and editors preserve:
 
-Until (2) exists, Budabit must not change its fetch profile because of this
-plugin. The plugin's value in the meantime is spam and storage control plus
-verifiable pre-filtering.
+   ```json
+   ["enforced-relay", "wss://relay.example"]
+   ```
+
+   Zero to 20 occurrences; each value MUST also appear as an `r` relay and be
+   a normalized `wss://` URL, otherwise the tag is ignored (it never
+   invalidates the definition). It states the owner's expectation that the
+   relay runs this policy for this branch. A client MAY use it to prefer that
+   relay for community reads and MAY, after spot-checking a sample of
+   returned events against current grants, skip client-side author
+   filtering for that relay's results. It MUST fall back to full client-side
+   admission the moment an unadmitted event is observed. The proposal is
+   recorded in `Budabit-Community-Architecture.md`; adopting it requires a
+   Communikeys amendment and a client change, and is not part of this
+   branch.
+
+Until (2) is adopted, Budabit must not change its fetch profile because of
+this plugin.
 
 ---
 
@@ -508,16 +531,14 @@ Budabit client-side admission outcomes; then flip dry-run off.
 
 ## 9. Phases
 
-| Phase | Deliverable | Exit criteria |
-| ----- | ----------- | ------------- |
-| 0 | Refactor `write-policy.py` into `policy/pipeline.py` + `storage.py` + `ratelimit.py`; move tests. Behaviour unchanged. | Existing tests pass; image builds; runbook unchanged. |
-| 1 | `protocol.py`, `selection.py`, `state.py`, `loader.py` (warm-up + reconcile), `--check-policy`. Rules: definitions, shards, section writer rule (§3.3–3.4 without bans), `kind_not_enabled`, strict/passthrough attribution. Dry-run flag. | Unit tests; integration scenario steps 1–4; dry-run deployed on `relay.budabit.club`. |
-| 2 | `reports.py`: person-ban fixpoint, report deletes, report authority rules (§3.5 rows 1984/1985/7 review/30168/1069/30222/30009/8, moderator requests, renunciations). | Golden vectors pass; integration steps 5–7. |
-| 3 | Budabit-side: vector export script, doc links (done with this plan), NIP-11 extension proposal or Caddy static NIP-11; rollout dry-run → enforce. | One week of dry-run parity ≥ 99% with client admission; enforce enabled. |
-| 4 | Strict mode carve-outs incl. NIP-34 repo relay attribution; `audit.py`; optional `sweep.py`. | Dedicated community relay can run strict. |
-| 5 | Auto-host mode (definitions naming this relay in `r`), Communikeys V2 amendment proposal for an owner-signed enforcement declaration, client fetch-profile change (drop `authors` where declared and verified). | Spec amendment merged in Budabit docs first. |
-
----
+| Phase | Deliverable | Status |
+| ----- | ----------- | ------ |
+| 0 | Refactor `write-policy.py` into `policy/pipeline.py` + `storage.py` + `ratelimit.py`; move tests. Behaviour unchanged. | Done. |
+| 1 | `protocol.py`, `selection.py`, `state.py`, `loader.py` (warm-up + reconcile), `--check-policy`. Section writer rule, `kind_not_enabled`, strict/passthrough attribution. Dry-run flag. | Done. |
+| 2 | `reports.py`: person-ban fixpoint, report deletes, report authority rules and workflow shapes (§3.5). | Done. |
+| 3 | Budabit-side vector export (`src/app/core/community-policy-vectors.test.ts`) and `tests/test_vectors.py`; NIP-11 via `relay.info.extra`; rollout dry-run → enforce. | Vectors and NIP-11 done. Rollout is operational (§6). |
+| 4 | `audit.py`, `sweep.py`; strict-mode NIP-34 repo-relay attribution. | Audit and sweep done. NIP-34 attribution deferred; strict mode passes NIP-34 kinds through. |
+| 5 | Auto-host mode (`BUDABIT_AUTO_HOST_URL`); owner-signed enforcement declaration; client fetch-profile change. | Auto-host done. Declaration proposed in docs (§3.7); client change not started. |
 
 ## 10. Risks and open questions
 
