@@ -1,8 +1,7 @@
 # Budabit write-control plugin for strfry — implementation plan
 
 Status: implemented on branch `feat/budabit-write-control` through phase 5
-with two exceptions: strict-mode NIP-34 repository attribution (§3.6, phase
-4) is deferred, and the client-side fetch-profile change that would consume
+with one exception: the client-side fetch-profile change that would consume
 an owner-signed enforcement declaration (§3.7 option 2, phase 5) is
 proposed in the docs but not implemented. The production dry-run rollout
 (§6) is an operational step. Target: `deploy/budabit/` on the Pleb5 strfry
@@ -64,8 +63,10 @@ is needed or made; no legacy-shape deletes were found on the live relays.
   Revocation and censor sweeps are an optional, separately-scheduled tool
   (§7), off by default.
 - **Repository-scoped authority (NIP-34 owner/maintainer rules).** Repo
-  events without a community `h` are outside community scope and pass
-  through. Enforcing maintainer rules is a separate future plugin module.
+  events belong on GRASP or the repository's own relays. Without a community
+  `h` they are outside community scope (passthrough in passthrough mode,
+  rejected in strict mode); with `h` they need a section that lists the
+  kind. Maintainer rules are not a relay concern here.
 
 ---
 
@@ -263,10 +264,16 @@ In strict mode (`BUDABIT_MODE=strict`) passthrough traffic is rejected with
 - Targetable originals (`31922, 31923, 9041, 1623, 30033`) whose author has
   the corresponding grant in at least one hosted branch (they are published
   to community relays alongside their wrapper).
-- NIP-34 repository events (`30617, 30618, 1617–1633, 1111` with repo `a`)
-  whose repository announcement is stored on this relay and declares this
-  relay in its `relays` tag (repo relays are legitimately this relay). Phase
-  4; until implemented strict mode passes NIP-34 kinds through.
+
+NIP-34 repository kinds get no carve-out. A `kind:30617` announcement with
+`h=<communityId>` is community content and follows the section rule (the
+Code-curator grant by default). Every other repository event (`30618`,
+`1617–1633`, repo-scoped `1111`/`1985`) belongs on GRASP or the
+repository's own relays; it is admitted only when a community deliberately
+lists that kind in a content section and the author holds the grant, which
+Budabit's default sections do not do. Without `h` such events are
+unattributable and strict mode rejects them like any other passthrough
+event.
 
 ### 3.7 Declaring enforcement (spec gap)
 
@@ -537,7 +544,7 @@ Budabit client-side admission outcomes; then flip dry-run off.
 | 1 | `protocol.py`, `selection.py`, `state.py`, `loader.py` (warm-up + reconcile), `--check-policy`. Section writer rule, `kind_not_enabled`, strict/passthrough attribution. Dry-run flag. | Done. |
 | 2 | `reports.py`: person-ban fixpoint, report deletes, report authority rules and workflow shapes (§3.5). | Done. |
 | 3 | Budabit-side vector export (`src/app/core/community-policy-vectors.test.ts`) and `tests/test_vectors.py`; NIP-11 via `relay.info.extra`; rollout dry-run → enforce. | Vectors and NIP-11 done. Rollout is operational (§6). |
-| 4 | `audit.py`, `sweep.py`; strict-mode NIP-34 repo-relay attribution. | Audit and sweep done. NIP-34 attribution deferred; strict mode passes NIP-34 kinds through. |
+| 4 | `audit.py`, `sweep.py`. | Done. (A strict-mode NIP-34 repo-relay carve-out was considered and rejected: repository events are not community content unless a section lists them; see §3.6.) |
 | 5 | Auto-host mode (`BUDABIT_AUTO_HOST_URL`); owner-signed enforcement declaration; client fetch-profile change. | Auto-host done. Declaration proposed in docs (§3.7); client change not started. |
 
 ## 10. Risks and open questions

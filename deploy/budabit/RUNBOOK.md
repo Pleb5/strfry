@@ -765,8 +765,11 @@ the timer prevented a silent backup failure.
   Budabit (`POLICY_VECTORS_OUT=... pnpm exec vitest run
   src/app/core/community-policy-vectors.test.ts`) whenever the client's
   permission rules change; the file records the Budabit commit it came from.
-- Strict-mode NIP-34 repository attribution is not implemented; strict mode
-  passes NIP-34 kinds through.
+- NIP-34 repository events have no special handling: an `h`-tagged
+  `kind:30617` needs the Code-curator grant; other repository kinds are
+  admitted only when a content section lists them (none do by default) and
+  are rejected in strict mode without `h`. Repository collaboration belongs
+  on GRASP.
 - Add privacy and terms URLs if the relay becomes a community production service.
 - Perform a signed publish and read-back test; read and Negentropy tests passed.
 - Configure an external HTTPS/WebSocket uptime monitor.

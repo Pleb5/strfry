@@ -412,9 +412,25 @@ class StrictModeTests(RulesBase):
         self.assert_accept(event(10002, MOD_CODE, [["r", RELAY]]))
         self.assert_reject(event(0, OUTSIDER, [], "{}"), "strict_passthrough")
 
-    def test_delete_and_nip34_pass(self):
+    def test_delete_passes(self):
         self.assert_accept(event(5, OUTSIDER, [["e", "a" * 64]]))
-        self.assert_accept(event(1621, OUTSIDER, [["a", f"30617:{MEMBER}:repo"]]))
+
+    def test_nip34_kinds_are_not_special(self):
+        # Repository collaboration belongs on GRASP/repo relays. Without a
+        # community h tag these are unattributable and strict mode rejects them.
+        repo_a = ["a", f"30617:{MEMBER}:repo"]
+        self.assert_reject(event(1621, MEMBER, [repo_a], "issue"), "strict_passthrough")
+        self.assert_reject(event(1618, OWNER, [repo_a], "pr"), "strict_passthrough")
+        self.assert_reject(event(30618, MEMBER, [["d", "repo"]]), "strict_passthrough")
+        # An h-tagged announcement is community content under Code-curator.
+        self.assert_accept(event(30617, MOD_CODE, [["h", COMMUNITY], ["d", "repo"]]))
+        self.assert_reject(event(30617, OUTSIDER, [["h", COMMUNITY], ["d", "repo"]]), "no_grant")
+        # Other h-tagged NIP-34 kinds need a section that lists them.
+        self.assert_reject(event(1621, OWNER, [["h", COMMUNITY], repo_a], "issue"), "kind_not_enabled")
+        sections = [("Issues", [["k", "1621"]], [shard_address(OWNER, "issues")])]
+        state = warm_state([definition(sections=sections), shard(OWNER, "issues", [MEMBER])])
+        self.assert_accept(event(1621, MEMBER, [["h", COMMUNITY], repo_a], "issue"), state=state)
+        self.assert_reject(event(1621, OUTSIDER, [["h", COMMUNITY], repo_a], "issue"), "no_grant", state=state)
 
     def test_targetable_original_with_grant(self):
         self.assert_accept(event(31922, OWNER, [["h", "targeting"], ["d", "cal"]]))

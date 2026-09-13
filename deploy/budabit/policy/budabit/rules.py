@@ -34,10 +34,6 @@ PERSONAL_KINDS = {
     30078,
 }
 
-# NIP-34 repository kinds pass through in strict mode until repo-relay
-# attribution (plan §3.6, phase 4) is implemented.
-NIP34_KINDS = {30617, 30618, 1617, 1618, 1619, 1621, 1622, 1623, 1624, 1630, 1631, 1632, 1633}
-
 
 @dataclass
 class Outcome:
@@ -326,8 +322,6 @@ def _strict_passthrough(event, state, config):
     pubkey = event.get("pubkey") or ""
     if kind == P.DELETE_KIND:
         return _accept("passthrough", reason="strict_delete")
-    if kind in NIP34_KINDS:
-        return _accept("passthrough", reason="strict_nip34_passthrough")
     branches = list(state.branches.values())
     if kind in PERSONAL_KINDS:
         if any(branch.derived().has_any_role(pubkey) for branch in branches):
