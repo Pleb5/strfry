@@ -596,4 +596,25 @@ doTest({
   verify: [1],
 });
 
+// ---- COMMUNIKEYS V2 (BUDABIT) DELETION TESTS ----
+
+const communityId = "c".repeat(64);
+
+doTest({
+  desc: "Unmarked a-tag for the definition still deletes it",
+  events: [
+    {
+      kind: 32222,
+      created_at: 5000,
+      tags: [d(communityId), ["name", "c"], ["r", "wss://relay.test"], ["content", "General"], ["k", "1111"]],
+    },
+    {
+      kind: 5,
+      created_at: 5002,
+      tags: [a(`32222:${ids[0].pub}:${communityId}`)],
+    },
+  ],
+  verify: [1],
+});
+
 console.log("All OK");
