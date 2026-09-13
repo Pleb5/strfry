@@ -90,7 +90,7 @@ class SectionWriteTests(RulesBase):
     def test_banned_member(self):
         self.state.apply(person_report(OWNER, MEMBER))
         self.assert_reject(thread(MEMBER), "person_banned")
-        self.assert_reject(event(1069, MEMBER, authority_tags()), "person_banned")
+        self.assert_reject(event(1069, MEMBER, [["a", f"30168:{OWNER}:apply", "", "form"]] + authority_tags()), "person_banned")
         self.assert_reject(event(7, MEMBER, authority_tags() + [["k", "32222"]], "+"), "person_banned")
 
     def test_shard_union(self):
@@ -127,6 +127,31 @@ class SectionWriteTests(RulesBase):
         self.assert_accept(event(0, OUTSIDER, [], "{}"))
         self.assert_accept(event(11, OUTSIDER, [["h", OTHER_COMMUNITY]]))
         self.assert_accept(event(31922, OUTSIDER, [["h", "targeting-id"], ["d", "cal"]]))
+
+    def test_moderator_label_without_section(self):
+        sections = [("Threads", [["k", "11", "threads"]], [shard_address(MOD_GENERAL, "threads")])]
+        state = warm_state([definition(sections=sections), shard(MOD_GENERAL, "threads", [MEMBER])])
+        label = lambda pk: event(1985, pk, [["h", COMMUNITY], ["L", "budabit:room"], ["l", "archived", "budabit:room"]])
+        self.assert_accept(label(OWNER), state=state)
+        self.assert_accept(label(MOD_GENERAL), state=state)
+        self.assert_reject(label(MEMBER), "kind_not_enabled", state=state)
+        state.apply(person_report(OWNER, MOD_GENERAL))
+        self.assert_reject(label(MOD_GENERAL), "kind_not_enabled", state=state)
+
+    def test_warm_up_gates_content_even_with_definition(self):
+        state = CommunityState([ADDRESS])
+        for ev in standard_events():
+            state.apply(ev)
+        # Definition and grants loaded, reports not yet: content must wait.
+        self.assert_reject(thread(MEMBER), "warming_up", state=state)
+        self.assert_reject(person_report(OWNER, OUTSIDER), "warming_up", state=state)
+        # Bootstrap authority events do not wait.
+        self.assert_accept(definition(), state=state)
+        self.assert_accept(shard(OWNER, "general", [OUTSIDER]), state=state)
+        self.assert_accept(event(5, MEMBER, [["e", "a" * 64]]), state=state)
+        for branch in state.branches.values():
+            branch.warm = True
+        self.assert_accept(thread(MEMBER), state=state)
 
     def test_censored_address_flag(self):
         address = f"30617:{MEMBER}:repo"
@@ -175,6 +200,35 @@ class AuthorityEventTests(RulesBase):
         outcome = self.assert_accept(forged)
         self.assertFalse(outcome.authority)
         self.assertEqual(outcome.scope, "passthrough")
+
+    def test_malformed_event_at_referenced_coordinate_rejected(self):
+        # strfry indexes the first d tag, so this would replace the stored shard.
+        forged = shard(OWNER, "general", [OUTSIDER])
+        forged["tags"].append(["d", "second"])
+        outcome = self.assert_reject(forged, "invalid_shard")
+        self.assertTrue(outcome.decision.msg.startswith("invalid:"))
+        # Declined status is a valid shard shape.
+        self.assert_accept(shard(MOD_GENERAL, "general", [], shard_no=2, declined=True))
+
+    def test_e_tag_deletion_of_shard_and_definition(self):
+        granting = shard(OWNER, "thread-creator", [MEMBER])
+        state = warm_state([definition()] + [granting])
+        self.assert_accept(thread(MEMBER), state=state)
+        state.apply(event(5, OWNER, [["e", granting["id"]]]))
+        self.assert_reject(thread(MEMBER), "no_grant", state=state)
+        # Someone else's e-tag delete of the owner's event does nothing.
+        state.apply(granting)
+        state.apply(event(5, OUTSIDER, [["e", granting["id"]]]))
+        self.assert_accept(thread(MEMBER), state=state)
+        state.apply(event(5, OWNER, [["e", state.branch(ADDRESS).definition.event["id"]]]))
+        self.assert_reject(thread(MEMBER), "definition_unavailable", state=state)
+
+    def test_e_tag_deletion_of_report(self):
+        report = person_report(OWNER, MEMBER)
+        self.state.apply(report)
+        self.assert_reject(thread(MEMBER), "person_banned")
+        self.state.apply(event(5, OWNER, [["e", report["id"]]]))
+        self.assert_accept(thread(MEMBER))
 
     def test_moderator_request(self):
         req = event(30000, OUTSIDER, [["d", "mod-request"], ["content", "General"]] + authority_tags())
@@ -246,7 +300,32 @@ class WorkflowRuleTests(RulesBase):
     def test_admission_response_open_to_outsiders(self):
         response = event(1069, OUTSIDER, [["a", f"30168:{MOD_GENERAL}:apply", "", "form"]] + authority_tags())
         self.assert_accept(response)
-        self.assert_reject(event(1069, OUTSIDER, [["h", COMMUNITY]]), "invalid_authority_tags")
+        self.assert_reject(event(1069, OUTSIDER, [["h", COMMUNITY]]), "invalid_workflow_shape")
+        # Missing the marked form reference.
+        self.assert_reject(event(1069, OUTSIDER, authority_tags()), "invalid_workflow_shape")
+        self.assert_reject(
+            event(1069, OUTSIDER, [["a", f"30168:{MOD_GENERAL}:apply", "", "form"], ["a", f"30168:{OWNER}:b", "", "form"]] + authority_tags()),
+            "invalid_workflow_shape",
+        )
+
+    def test_malformed_workflow_shapes_gain_no_permission(self):
+        # Star with only h and k, arbitrary content, event/person targets.
+        self.assert_reject(
+            event(7, OUTSIDER, [["h", COMMUNITY], ["k", "32222"], ["e", "c" * 64], ["p", MEMBER]], "lol"),
+            "invalid_workflow_shape",
+        )
+        self.assert_reject(event(7, OUTSIDER, authority_tags() + [["k", "32222"]], "-"), "invalid_workflow_shape")
+        # Admission review without form address or applicant.
+        self.assert_reject(
+            event(7, MOD_GENERAL, [["e", "b" * 64, "", OUTSIDER, "response"], ["k", "1069"]] + authority_tags() + [["content", "General"]], "+"),
+            "invalid_workflow_shape",
+        )
+        self.assert_reject(
+            event(7, MOD_GENERAL, [["e", "b" * 64, "", OUTSIDER, "response"], ["k", "1069"], ["a", f"30168:{MOD_GENERAL}:apply", "", "form"], ["p", OUTSIDER], ["content", "General"], ["h", COMMUNITY]], "+"),
+            "invalid_workflow_shape",
+        )
+        # Moderator request decision without authority tags.
+        self.assert_reject(event(7, OWNER, [["h", COMMUNITY], ["e", "d" * 64], ["k", "30000"]], "+"), "invalid_workflow_shape")
 
     def test_admission_review(self):
         review = lambda pk, section, content="+": event(

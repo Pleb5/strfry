@@ -50,7 +50,7 @@ class BudabitWriteControl(Stage):
         outcome = request.annotations.get("budabit")
         if outcome is None or not outcome.authority:
             return
-        for branch, change in self.state.apply(request.event):
+        for branch, change in self.state.apply(request.event, inline=True):
             self.metrics.state_change(branch, change, request.event)
 
     def health(self):

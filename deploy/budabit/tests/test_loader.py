@@ -1,4 +1,5 @@
 import io
+import time
 import unittest
 
 from fixtures import (
@@ -133,6 +134,35 @@ class LoaderTests(unittest.TestCase):
         scanner.events = [e for e in scanner.events if e["kind"] != 32222]
         loader.reconcile()
         self.assertFalse(branch.derived().available)
+
+    def test_reconcile_drops_reports_missing_from_storage(self):
+        report = person_report(OWNER, OUTSIDER)
+        state, loader, scanner, _ = make_loader(standard_events() + [report])
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        self.assertEqual(branch.derived().person_bans, {OUTSIDER})
+        scanner.events = [e for e in scanner.events if e["id"] != report["id"]]
+        loader.reconcile()
+        self.assertEqual(branch.derived().person_bans, set())
+
+    def test_reconcile_keeps_inline_events_within_grace(self):
+        state, loader, scanner, _ = make_loader(standard_events())
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        # Accepted inline a moment ago; strfry has not committed it yet, so the
+        # scan does not return it. It must survive this reconcile.
+        granting = shard(OWNER, "thread-creator", [OUTSIDER])
+        state.apply(granting, inline=True)
+        report = person_report(OWNER, MEMBER)
+        state.apply(report, inline=True)
+        loader.reconcile()
+        self.assertTrue(branch.derived().can_write(OUTSIDER, 11, "threads"))
+        self.assertIn(MEMBER, branch.derived().person_bans)
+        # Once the grace window has passed and storage still lacks them, drop.
+        branch.clock = lambda: time.monotonic() + 10_000.0
+        loader.reconcile()
+        self.assertFalse(branch.derived().can_write(OUTSIDER, 11, "threads"))
+        self.assertNotIn(MEMBER, branch.derived().person_bans)
 
     def test_stale_definition_in_storage_does_not_regress(self):
         old = definition(created_at=1_000)

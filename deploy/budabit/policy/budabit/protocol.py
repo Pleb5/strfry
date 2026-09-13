@@ -135,17 +135,50 @@ def parse_canonical_kind(value):
 
 _DEFAULT_PORTS = {"wss": "443", "ws": "80", "https": "443", "http": "80"}
 
+# Characters the WHATWG serializer leaves untouched in path and query. Anything
+# else (space, quotes, angle brackets, braces, backslash, caret, pipe, non-ASCII,
+# controls) would be percent-encoded, so an input containing it can never equal
+# its own normalisation and the client rejects it.
+_URL_SAFE = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~:/?#[]@!$&'()*+,;=%")
+_HOST_SAFE = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-.")
+_DOT_SEGMENTS = frozenset({".", "..", "%2e", "%2e%2e", ".%2e", "%2e."})
+
+
+def _remove_dot_segments(path):
+    """WHATWG path state: '.' is dropped, '..' pops (never above root)."""
+    segments = path.split("/")[1:]
+    out = []
+    for index, segment in enumerate(segments):
+        lowered = segment.lower()
+        last = index == len(segments) - 1
+        if lowered in ("..", "%2e%2e", ".%2e", "%2e."):
+            if out:
+                out.pop()
+            if last:
+                out.append("")
+        elif lowered in (".", "%2e"):
+            if last:
+                out.append("")
+        else:
+            out.append(segment)
+    return "/" + "/".join(out)
+
 
 def normalize_url(value, schemes):
-    """WHATWG-like URL normalisation as used by the Budabit client.
+    """WHATWG-equivalent normalisation for the subset of URLs Communikeys allows.
 
-    Lower-case scheme and host, drop default ports, reject credentials,
-    fragments, and empty hosts. A terminal ``/`` is removed only when it is
-    the whole path and there is no query.
+    Lower-case scheme and host, drop default ports, remove dot segments,
+    compress IPv6 hosts, reject credentials, fragments, empty hosts, and any
+    character the WHATWG serializer would percent-encode (see ``_URL_SAFE``).
+    A terminal ``/`` is removed only when it is the whole path and there is
+    no query. Inputs the serializer would rewrite in ways not reproduced here
+    return None rather than a guess.
     """
     if not isinstance(value, str) or value != value.strip() or utf8_length(value) > 2048:
         return None
-    if not value:
+    if not value or any(ch not in _URL_SAFE for ch in value):
+        return None
+    if "\\" in value:
         return None
     try:
         parts = urlsplit(value)
@@ -156,7 +189,8 @@ def normalize_url(value, schemes):
         return None
     if parts.fragment or "#" in value:
         return None
-    if parts.username is not None or parts.password is not None or "@" in (parts.netloc or ""):
+    netloc = parts.netloc or ""
+    if "@" in netloc or parts.username is not None or parts.password is not None:
         return None
     try:
         hostname = parts.hostname
@@ -166,15 +200,26 @@ def normalize_url(value, schemes):
     if not hostname:
         return None
     host = hostname.lower()
-    if ":" in host:
-        host = f"[{host}]"
+    if netloc.startswith("["):
+        try:
+            import ipaddress
+
+            host = f"[{ipaddress.IPv6Address(host).compressed}]"
+        except ValueError:
+            return None
+    elif any(ch not in _HOST_SAFE for ch in host):
+        return None
     if port is not None and str(port) != _DEFAULT_PORTS.get(scheme):
         netloc = f"{host}:{port}"
     else:
         netloc = host
-    path = parts.path or "/"
-    normalized = urlunsplit((scheme, netloc, path, parts.query, ""))
-    if path == "/" and not parts.query:
+    path = _remove_dot_segments(parts.path or "/")
+    query = parts.query
+    if "'" in query:
+        # Special-scheme query percent-encode set includes the apostrophe.
+        return None
+    normalized = urlunsplit((scheme, netloc, path, query, ""))
+    if path == "/" and not query:
         normalized = normalized[:-1]
     return normalized
 
@@ -890,6 +935,101 @@ def is_report_delete(delete_event, report):
         return False
     k_tags = get_tags(tags, "k")
     return not k_tags or any(len(tag) > 1 and tag[1] == str(REPORT_KIND) for tag in k_tags)
+
+
+# --- workflow shapes ---------------------------------------------------------
+
+
+def parse_form_address(value):
+    """``30168:<pubkey>:<identifier>`` (mirrors parseAdmissionFormAddress)."""
+    if not isinstance(value, str):
+        return None
+    parts = value.split(":")
+    if len(parts) < 3 or parts[0] != str(FORM_TEMPLATE_KIND):
+        return None
+    pubkey = parse_owner_pubkey(parts[1])
+    identifier = ":".join(parts[2:])
+    if not pubkey or not identifier:
+        return None
+    return value
+
+
+def _single_marked_form(tags):
+    matches = [tag for tag in tags if tag and tag[0] == "a" and len(tag) > 3 and tag[3] == "form"]
+    if len(matches) != 1 or len(matches[0]) != 4:
+        return None
+    return parse_form_address(matches[0][1])
+
+
+def is_star(event):
+    """Community star: kind 7, content '+', authority tags, k=32222 (mirrors parseCommunityStarReaction)."""
+    if event.get("kind") != REACTION_KIND or event.get("content") != "+":
+        return False
+    tags = event.get("tags") or []
+    if parse_authority(tags) is None:
+        return False
+    return _first_tag_value(tags, "k") == str(COMMUNITY_DEFINITION_KIND)
+
+
+def is_admission_response(event):
+    """kind 1069 with authority tags and exactly one marked form address (mirrors parseAdmissionResponse)."""
+    if event.get("kind") != FORM_RESPONSE_KIND:
+        return False
+    tags = event.get("tags") or []
+    return parse_authority(tags) is not None and _single_marked_form(tags) is not None
+
+
+def admission_review_section(event):
+    """Section name of a valid admission review, else None (mirrors parseAdmissionReview)."""
+    if event.get("kind") != REACTION_KIND or event.get("content") not in ("+", "-"):
+        return None
+    tags = event.get("tags") or []
+    if parse_authority(tags) is None:
+        return None
+    responses = [tag for tag in tags if tag and tag[0] == "e" and len(tag) > 4 and tag[4] == "response"]
+    applicants = get_tags(tags, "p")
+    if len(responses) != 1 or len(responses[0]) != 5 or not responses[0][1]:
+        return None
+    if _single_marked_form(tags) is None:
+        return None
+    if len(applicants) != 1 or not exact_tag(applicants[0], 2) or not normalize_pubkey(applicants[0][1]):
+        return None
+    k_tags = get_tags(tags, "k")
+    if k_tags and not any(len(tag) > 1 and tag[1] == str(FORM_RESPONSE_KIND) for tag in k_tags):
+        return None
+    return normalize_section_name(_first_tag_value(tags, "content") or "")
+
+
+def looks_like_admission_review(tags):
+    """Discriminator only; use admission_review_section for the full shape."""
+    return any(tag and tag[0] == "e" and len(tag) > 4 and tag[4] == "response" for tag in tags) or (
+        _first_tag_value(tags, "k") == str(FORM_RESPONSE_KIND)
+    )
+
+
+def is_moderator_request_decision(event):
+    """Owner reaction on a kind 30000 request: authority tags, k=30000, an e target (mirrors getActiveTargetReactions)."""
+    if event.get("kind") != REACTION_KIND or event.get("content") not in ("+", "-"):
+        return False
+    tags = event.get("tags") or []
+    if parse_authority(tags) is None:
+        return False
+    return _first_tag_value(tags, "k") == str(PROFILE_LIST_KIND) and any(
+        tag and tag[0] == "e" and len(tag) > 1 and is_hex64(tag[1]) for tag in tags
+    )
+
+
+def is_moderator_request(event):
+    """Requester-authored empty kind 30000 with authority tags and no p tags."""
+    if event.get("kind") != PROFILE_LIST_KIND or event.get("content") != "":
+        return False
+    tags = event.get("tags") or []
+    if any(tag and tag[0] == "p" for tag in tags):
+        return False
+    d_tags = get_tags(tags, "d")
+    if len(d_tags) != 1 or not exact_tag(d_tags[0], 2) or not d_tags[0][1]:
+        return False
+    return parse_authority(tags) is not None
 
 
 # --- kind:5 tombstones -------------------------------------------------------

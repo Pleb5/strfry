@@ -12,8 +12,13 @@ a new write. ``apply`` is idempotent under the selection rule.
 """
 
 import threading
+import time
 
 from . import protocol
+
+# An event accepted inline is not yet in LMDB when strfry asks the plugin; a
+# reconcile scan that runs in that window must not treat it as deleted.
+INLINE_GRACE_SECONDS = 60.0
 from .reports import AuthorityView, compute_report_state
 from .selection import Coordinate
 
@@ -29,6 +34,8 @@ class Branch:
         self.reports = {}  # report id -> event
         self.report_deletes = {}  # report id -> [kind:5 events]
         self.pending_tombstones = []  # kind:5 seen before their coordinate was referenced
+        self.inline_seen_at = {}  # event id -> monotonic time it was applied inline
+        self.clock = time.monotonic
         self.warm = False
         self.needs_reconcile = False
         self._dirty = True
@@ -37,9 +44,21 @@ class Branch:
 
     # --- mutation -----------------------------------------------------------
 
-    def apply(self, event):
-        """Feed an authority event. Returns a change label or None."""
+    def apply(self, event, inline=False):
+        """Feed an authority event. Returns a change label or None.
+
+        ``inline=True`` marks events accepted from the live write path (as
+        opposed to replayed from storage) so reconcile grants them a grace
+        period before treating their absence from a scan as a deletion.
+        """
         with self.lock:
+            if inline and event.get("id"):
+                self.inline_seen_at[event["id"]] = self.clock()
+                if len(self.inline_seen_at) > 10000:
+                    cutoff = self.clock() - INLINE_GRACE_SECONDS
+                    self.inline_seen_at = {
+                        k: v for k, v in self.inline_seen_at.items() if v >= cutoff
+                    }
             kind = event.get("kind")
             if kind == protocol.COMMUNITY_DEFINITION_KIND:
                 return self._apply_definition(event)
@@ -119,6 +138,30 @@ class Branch:
 
     def _apply_delete(self, event):
         changed = None
+        deleter = event.get("pubkey")
+        deleted_ids = {
+            tag[1] for tag in protocol.get_tags(event.get("tags") or [], "e") if len(tag) > 1
+        }
+        if deleted_ids:
+            # strfry removes any same-author event named by an e tag. Mirror
+            # that for the definition, shards, and reports we track.
+            current = self.definition_coord.current
+            if current is not None and current.get("id") in deleted_ids and current.get("pubkey") == deleter:
+                self.definition_coord.current = None
+                self.definition = None
+                self._sync_shard_coordinates()
+                self._dirty = True
+                changed = "definition_deleted"
+            for coord in self.shards.values():
+                if coord.current is not None and coord.current.get("id") in deleted_ids and coord.current.get("pubkey") == deleter:
+                    coord.current = None
+                    self._dirty = True
+                    changed = changed or "shard_deleted"
+            for report_id in list(self.reports):
+                if report_id in deleted_ids and self.reports[report_id].get("pubkey") == deleter:
+                    del self.reports[report_id]
+                    self._dirty = True
+                    changed = changed or "report_deleted"
         for address in protocol.tombstone_addresses(event):
             if address == self.address:
                 if self.definition_coord.tombstone(event):
@@ -145,17 +188,22 @@ class Branch:
                     changed = changed or "report_deleted"
         return changed
 
+    def _in_grace(self, event_id):
+        seen = self.inline_seen_at.get(event_id)
+        return seen is not None and self.clock() - seen < INLINE_GRACE_SECONDS
+
     def retain_only(self, address, present_ids):
         """Drop the current event at ``address`` if storage no longer holds it.
 
         Called by the loader after scanning a coordinate so that deletions the
-        plugin never saw inline (``strfry delete``, imports, a-tag deletions
-        with a shape the plugin did not track) converge on the next reconcile.
+        plugin never saw inline (``strfry delete``, imports) converge on the
+        next reconcile. Events accepted inline within the grace window are
+        kept because strfry may not have committed them yet.
         """
         with self.lock:
             if address == self.address:
                 current = self.definition_coord.current
-                if current is not None and current.get("id") not in present_ids:
+                if current is not None and current.get("id") not in present_ids and not self._in_grace(current.get("id")):
                     self.definition_coord.current = None
                     self.definition = None
                     self._sync_shard_coordinates()
@@ -163,11 +211,28 @@ class Branch:
                     return "definition_removed"
                 return None
             coord = self.shards.get(address)
-            if coord is not None and coord.current is not None and coord.current.get("id") not in present_ids:
+            if (
+                coord is not None
+                and coord.current is not None
+                and coord.current.get("id") not in present_ids
+                and not self._in_grace(coord.current.get("id"))
+            ):
                 coord.current = None
                 self._dirty = True
                 return "shard_removed"
             return None
+
+    def retain_reports(self, present_ids):
+        """Drop tracked reports that storage no longer holds (outside the grace window)."""
+        with self.lock:
+            removed = 0
+            for report_id in list(self.reports):
+                if report_id not in present_ids and not self._in_grace(report_id):
+                    del self.reports[report_id]
+                    removed += 1
+            if removed:
+                self._dirty = True
+            return removed
 
     # --- derived sets -------------------------------------------------------
 
@@ -344,11 +409,18 @@ class CommunityState:
             branch for branch in self.branches.values() if branch.shard_ref_for(event) is not None
         ]
 
-    def apply(self, event):
+    def branches_for_coordinate(self, event):
+        """Branches that reference the storage coordinate (first d tag) of this kind:30000."""
+        address = protocol.get_addressable_address(event)
+        if address is None:
+            return []
+        return [branch for branch in self.branches.values() if address in branch.shards]
+
+    def apply(self, event, inline=False):
         """Offer an event to every branch it could concern. Returns [(branch, change)]."""
         changes = []
         for branch in self.branches.values():
-            change = branch.apply(event)
+            change = branch.apply(event, inline=inline)
             if change:
                 changes.append((branch, change))
         return changes

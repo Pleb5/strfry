@@ -71,32 +71,6 @@ def _tag_value(tags, name):
     return None
 
 
-def _is_star(tags):
-    return _tag_value(tags, "k") == str(P.COMMUNITY_DEFINITION_KIND)
-
-
-def _is_admission_review(tags):
-    has_response_ref = any(
-        tag and tag[0] == "e" and len(tag) == 5 and tag[4] == "response" for tag in tags
-    )
-    return has_response_ref and _tag_value(tags, "k") == str(P.FORM_RESPONSE_KIND)
-
-
-def _is_moderator_request_decision(tags):
-    return _tag_value(tags, "k") == str(P.PROFILE_LIST_KIND) and any(
-        tag and tag[0] == "e" for tag in tags
-    )
-
-
-def _is_moderator_request(event):
-    tags = event.get("tags") or []
-    if event.get("content") != "":
-        return False
-    if any(tag and tag[0] == "p" for tag in tags):
-        return False
-    return P.parse_authority(tags) is not None
-
-
 def _banned(community_id):
     return _reject("blocked: author is moderated in this community", "person_banned", community_id)
 
@@ -105,13 +79,17 @@ def _banned(community_id):
 
 
 def _availability(branch, derived):
+    # Ordinary hosted content needs the complete snapshot (definition, shards,
+    # reports); grants without bans would fail open. Authority events that
+    # bootstrap the branch (definitions, referenced shards, deletes) are
+    # handled before this point and do not wait.
+    if not branch.warm:
+        return _reject(
+            "error: relay policy is loading, retry shortly",
+            "warming_up",
+            branch.community_id,
+        )
     if not derived.available:
-        if not branch.warm:
-            return _reject(
-                "error: relay policy is loading, retry shortly",
-                "warming_up",
-                branch.community_id,
-            )
         return _reject(
             "blocked: community definition is not available on this relay",
             "definition_unavailable",
@@ -226,10 +204,10 @@ def evaluate_branch(event, branch, config, authority_required):
         )
 
     if kind == P.FORM_RESPONSE_KIND:
-        if authority is None:
+        if not P.is_admission_response(event):
             return _reject(
-                "invalid: admission response requires h and marked community a",
-                "invalid_authority_tags",
+                "invalid: admission response requires h, marked community a, and one marked form a",
+                "invalid_workflow_shape",
                 community_id,
             )
         if banned:
@@ -239,7 +217,7 @@ def evaluate_branch(event, branch, config, authority_required):
     if kind == P.PROFILE_LIST_KIND:
         # Referenced shards are handled before branch evaluation; here only
         # moderator requests remain.
-        if authority is None or not _is_moderator_request(event):
+        if not P.is_moderator_request(event):
             return _reject(
                 "invalid: profile list is neither a referenced shard nor a moderator request",
                 "invalid_shard",
@@ -249,13 +227,29 @@ def evaluate_branch(event, branch, config, authority_required):
             return _banned(community_id)
         return _accept("hosted", community_id)
 
+    if kind == P.LABEL_KIND and derived.is_moderator(pubkey):
+        # Moderator labels (report reviews, room archive) do not need a section.
+        return _accept("hosted", community_id)
+
     if kind == P.REACTION_KIND:
-        if _is_star(tags):
+        if _tag_value(tags, "k") == str(P.COMMUNITY_DEFINITION_KIND):
+            if not P.is_star(event):
+                return _reject(
+                    "invalid: community star requires content '+', h, and marked community a",
+                    "invalid_workflow_shape",
+                    community_id,
+                )
             if banned:
                 return _banned(community_id)
             return _accept("hosted", community_id)
-        if _is_admission_review(tags):
-            section_name = P.normalize_section_name(_tag_value(tags, "content") or "")
+        if P.looks_like_admission_review(tags):
+            section_name = P.admission_review_section(event)
+            if section_name is None:
+                return _reject(
+                    "invalid: admission review requires h, marked community a, marked form a, marked response e, and one applicant p",
+                    "invalid_workflow_shape",
+                    community_id,
+                )
             section = derived.definition.section_named(section_name) if section_name else None
             if section is None:
                 return _reject(
@@ -270,7 +264,13 @@ def evaluate_branch(event, branch, config, authority_required):
                 "review_authority",
                 community_id,
             )
-        if _is_moderator_request_decision(tags):
+        if _tag_value(tags, "k") == str(P.PROFILE_LIST_KIND):
+            if not P.is_moderator_request_decision(event):
+                return _reject(
+                    "invalid: moderator request decision requires content '+'/'-', h, marked community a, and an e target",
+                    "invalid_workflow_shape",
+                    community_id,
+                )
             if pubkey == derived.owner:
                 return _accept("hosted", community_id)
             return _reject(
@@ -358,9 +358,19 @@ def evaluate(event, state, config):
     if kind == P.PROFILE_LIST_KIND:
         if P.is_renounced_communities_list(event):
             return _accept("passthrough", reason="renunciation")
-        shard_branches = state.branches_for_shard(event)
-        if shard_branches:
-            return _accept("authority", shard_branches[0].community_id, authority=True)
+        # Attribute by the coordinate strfry will store it under (first d tag),
+        # then insist on the exact shard structure so a malformed event cannot
+        # replace a valid shard in storage while slipping past as passthrough.
+        coordinate_branches = state.branches_for_coordinate(event)
+        if coordinate_branches:
+            branch = coordinate_branches[0]
+            if branch.shard_ref_for(event) is None:
+                return _reject(
+                    "invalid: profile-list shard requires exactly one d tag matching the referenced coordinate",
+                    "invalid_shard",
+                    branch.community_id,
+                )
+            return _accept("authority", branch.community_id, authority=True)
         authority = P.parse_authority(tags)
         if authority is not None:
             branch = state.branch(authority.address)

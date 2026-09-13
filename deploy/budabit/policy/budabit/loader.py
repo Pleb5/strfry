@@ -177,11 +177,15 @@ class Loader:
                 self._apply_all(branch, shard_events)
                 self._retain(branch, address, shard_events)
 
-        # Reports and community-scoped deletes.
+        # Reports and community-scoped deletes. Deletes first so a report and
+        # its retraction are both known before derivation.
         self._apply_all(
             branch, self.scanner.scan({"kinds": [P.DELETE_KIND], "#h": [community_id]})
         )
-        self._apply_all(
-            branch, self.scanner.scan({"kinds": [P.REPORT_KIND], "#h": [community_id]})
-        )
+        reports = self.scanner.scan({"kinds": [P.REPORT_KIND], "#h": [community_id]})
+        self._apply_all(branch, reports)
+        removed = branch.retain_reports({event.get("id") for event in reports})
+        if removed:
+            self.metrics.count("loader_apply", change="report_removed")
+            self.metrics.log("report_removed", community=community_id[:8], count=removed)
         branch.needs_reconcile = False
