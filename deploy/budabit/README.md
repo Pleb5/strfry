@@ -39,16 +39,32 @@ the Budabit client would not admit: authors without a current section grant,
 effectively person-banned authors, and structurally invalid Communikeys V2
 events. Everything else passes through (or is rejected in `BUDABIT_MODE=strict`).
 
+While enabled, the stage rejects kind-5 requests tagging 32222/30000 through `k`
+or `a`, including owner requests and unhosted coordinates. E-only targets currently
+held as definitions/shards are protected too. The reply is
+`blocked: Deletion of kinds 32222 and 30000 is not allowed`. Update definitions
+and lists instead; report-only retractions remain allowed. Unknown e-only ids
+cannot be classified without a lookup and are not blocked by this tag rule.
+
 State is rebuilt from the relay's own LMDB with `strfry scan` at start and
 every `BUDABIT_RECONCILE_SECONDS`, and updated inline from every accepted
 definition, profile-list shard, report, and deletion, so a grant published to
 this relay takes effect for the very next write. `BUDABIT_AUTO_HOST_URL`
 additionally hosts every valid definition that names this relay.
 
+Deletion history is loaded only through scoped scans, not full per-author
+kind:5 scans. Missing inline definitions/shards are remembered after a 60 s
+grace so replays cannot repeatedly restore grants. After restart, an unobserved
+e-only deletion leaves a temporary authorization window until reconcile;
+see the [deletion replay trade-off](RUNBOOK.md#deletion-replay-trade-off).
+
 Conformance with the Budabit client is pinned by golden vectors exported
 from the client's own permission code (`tests/vectors/`). `audit.py` replays
 stored content against the rules; `sweep.py` deletes what an audit lists.
 `write-policy.py --nip11-extra` produces the NIP-11 advertisement.
+It includes `dry_run`/`enforcing` state and `protected_deletion_kinds`.
+Budabit's `community-policy-conformance.json` pins the fixture for its CI drift
+check; the no-deletion restriction has separate relay tests.
 
 Design, semantics, and rollout: [WRITE-CONTROL-PLAN.md](WRITE-CONTROL-PLAN.md).
 Operations: [RUNBOOK.md](RUNBOOK.md#community-write-control).

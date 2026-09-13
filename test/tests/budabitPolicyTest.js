@@ -6,7 +6,7 @@
 //
 // Run from the repository root:  node test/tests/budabitPolicyTest.js
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -52,6 +52,11 @@ const authority = () => [
 const shardAddress = (who, purpose) => `30000:${who.pub}:${communityId}-${purpose}`;
 
 function config() {
+  const advertisement = spawnSync("python3", [pluginPath, "--nip11-extra"], {
+    encoding: "utf8",
+    env: { ...process.env, BUDABIT_BRANCHES: address, BUDABIT_DISABLE_LOADER: "1", BUDABIT_DRY_RUN: "0", BUDABIT_AUTO_HOST_URL: "" },
+  });
+  if (advertisement.status !== 0) throw new Error(`NIP-11 generation failed: ${advertisement.stderr}`);
   const env = [
     `BUDABIT_BRANCHES=${address}`,
     `BUDABIT_STRFRY_BIN=${path.resolve("strfry")}`,
@@ -75,6 +80,10 @@ relay {
   port = ${port}
   nofiles = 0
   autoPingSeconds = 0
+
+  info {
+    extra = ${JSON.stringify(advertisement.stdout.trim())}
+  }
 
   auth {
     enabled = false
@@ -180,6 +189,11 @@ async function main() {
     await waitForRelay(wsUrl);
     client = new WsClient(await openWebSocket(wsUrl));
 
+    const info = await (await fetch(`http://127.0.0.1:${port}/`, { headers: { Accept: "application/nostr+json" }, signal: AbortSignal.timeout(5_000) })).json();
+    expect(info.budabit.enforcing === true && info.budabit.dry_run === false, "NIP-11 advertises active enforcement");
+    expect(info.budabit.enforced_branches.includes(address), "NIP-11 advertises the exact branch");
+    expect(JSON.stringify(info.budabit.protected_deletion_kinds) === "[30000,32222]", "NIP-11 advertises deletion protection");
+
     console.log("* bootstrap");
     expectBlocked(
       await publishRetryWhileLoading(client, ...thread(owner)),
@@ -192,13 +206,15 @@ async function main() {
       "invalid:",
       "invalid definition rejected",
     );
-    expectAccepted(await publish(client, sign(owner, 32222, definitionTags())), "definition accepted");
+    const definition = sign(owner, 32222, definitionTags());
+    expectAccepted(await publish(client, definition), "definition accepted");
     expectAccepted(await publish(client, sign(owner, ...thread(owner).slice(1))), "owner thread after definition");
 
     console.log("* grants");
     expectBlocked(await publish(client, sign(...thread(outsider))), "blocked: not a current writer", "outsider thread rejected");
+    const grant = sign(owner, 30000, [["d", `${communityId}-thread-creator`], ["p", outsider.pub]]);
     expectAccepted(
-      await publish(client, sign(owner, 30000, [["d", `${communityId}-thread-creator`], ["p", outsider.pub]])),
+      await publish(client, grant),
       "owner shard grants outsider",
     );
     expectAccepted(await publish(client, sign(...thread(outsider))), "outsider thread accepted immediately");
@@ -242,16 +258,19 @@ async function main() {
       ["k", "1984"],
       ...authority(),
     ]);
-    expectAccepted(await publish(client, badDelete), "owner delete carrying the branch a is a real NIP-09 deletion");
-    expect((await count(client, { kinds: [32222], authors: [owner.pub] })) === 0, "definition was tombstoned by the a tag");
-    console.log("  ok   marked community a on kind 5 tombstones the definition (why Budabit stopped emitting it)");
-    expectBlocked(
-      await publish(client, sign(owner, ...thread(owner).slice(1))),
-      "blocked: community definition is not available",
-      "branch is gone until a newer definition is published",
-    );
-    expectAccepted(await publish(client, sign(owner, 32222, definitionTags())), "fresh definition recreates the branch");
-    expectAccepted(await publish(client, sign(...thread(outsider))), "grantee accepted again");
+    const deletionDenied = "blocked: Deletion of kinds 32222 and 30000 is not allowed";
+    for (const target of [definition, grant]) {
+      expectBlocked(await publish(client, sign(owner, 5, [["e", target.id]])), deletionDenied, `known kind ${target.kind} e-only deletion denied`);
+    }
+    expectBlocked(await publish(client, badDelete), deletionDenied, "marked branch a cannot delete the definition");
+    expect((await count(client, { kinds: [32222], authors: [owner.pub] })) === 1, "definition survives rejected deletion");
+    for (const kind of [32222, 30000]) {
+      expectBlocked(await publish(client, sign(owner, 5, [["k", String(kind)], ["e", "b".repeat(64)]])), deletionDenied, `kind ${kind} deletion denied`);
+    }
+    expectBlocked(await publish(client, sign(owner, 5, [["a", `30000:${owner.pub}:${communityId}-thread-creator`]])), deletionDenied, "permission shard coordinate deletion denied");
+    expectBlocked(await publish(client, sign(...thread(outsider))), "blocked: author is moderated", "rejected mixed deletion did not retract the report");
+    expectAccepted(await publish(client, sign(owner, 5, [["h", communityId], ["e", report2.id, "", owner.pub, "report"], ["k", "1984"]])), "report-only retraction still allowed");
+    expectAccepted(await publish(client, sign(...thread(outsider))), "grantee accepted after real report retraction");
     const foreignDelete = sign(moderator, 5, [
       ["h", communityId],
       ["e", "b".repeat(64), "", moderator.pub, "report"],

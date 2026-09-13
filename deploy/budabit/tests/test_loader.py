@@ -1,5 +1,4 @@
 import io
-import time
 import unittest
 
 from fixtures import (
@@ -22,10 +21,11 @@ from fixtures import (
     standard_events,
     thread,
 )
+from policy.budabit import protocol as P, rules
 from policy.budabit.loader import Loader
 from policy.budabit.metrics import Metrics
 from policy.budabit.stage import BudabitWriteControl
-from policy.budabit.state import CommunityState
+from policy.budabit.state import CommunityState, INLINE_GRACE_SECONDS
 from policy.pipeline import Pipeline
 
 
@@ -91,6 +91,25 @@ class LoaderTests(unittest.TestCase):
         self.assertTrue(derived.available)
         self.assertFalse(derived.can_write(MEMBER, 1111))
 
+    def test_deletion_scans_stay_coordinate_or_community_scoped(self):
+        state, loader, scanner, _ = make_loader(standard_events())
+        loader.warm_up()
+        expected = [
+            {"kinds": [5], "authors": [OWNER], "#a": [ADDRESS]},
+            {"kinds": [32222], "authors": [OWNER], "#d": [COMMUNITY]},
+        ]
+        for address in state.branch(ADDRESS).shards:
+            parsed = P.parse_address(address, P.PROFILE_LIST_KIND)
+            expected.extend([
+                {"kinds": [5], "authors": [parsed.pubkey], "#a": [address]},
+                {"kinds": [30000], "authors": [parsed.pubkey], "#d": [parsed.identifier]},
+            ])
+        expected.extend([{"kinds": [5], "#h": [COMMUNITY]}, {"kinds": [1984], "#h": [COMMUNITY]}])
+        self.assertEqual(scanner.calls, expected)
+        scanner.calls.clear()
+        loader.reconcile()
+        self.assertEqual(scanner.calls, expected)
+
     def test_deleted_report_loaded_before_report(self):
         report = person_report(OWNER, OUTSIDER)
         events = standard_events() + [report, report_delete(report)]
@@ -135,6 +154,12 @@ class LoaderTests(unittest.TestCase):
         scanner.events = [e for e in scanner.events if e["kind"] != 32222]
         loader.reconcile()
         self.assertFalse(branch.derived().available)
+        # Absence alone is not a deletion index. These events were only loaded
+        # from storage, so restoring them through import must still work.
+        self.assertTrue(all(not branch.is_deleted(e) for e in events))
+        scanner.events = events
+        loader.reconcile()
+        self.assertTrue(branch.derived().can_write(MEMBER, 11, "threads"))
 
     def test_reconcile_drops_reports_missing_from_storage(self):
         report = person_report(OWNER, OUTSIDER)
@@ -150,6 +175,7 @@ class LoaderTests(unittest.TestCase):
         state, loader, scanner, _ = make_loader(standard_events())
         loader.warm_up()
         branch = state.branch(ADDRESS)
+        branch.clock = lambda: 0.0
         # Accepted inline a moment ago; strfry has not committed it yet, so the
         # scan does not return it. It must survive this reconcile.
         granting = shard(OWNER, "thread-creator", [OUTSIDER])
@@ -160,26 +186,146 @@ class LoaderTests(unittest.TestCase):
         self.assertTrue(branch.derived().can_write(OUTSIDER, 11, "threads"))
         self.assertIn(MEMBER, branch.derived().person_bans)
         # Once the grace window has passed and storage still lacks them, drop.
-        branch.clock = lambda: time.monotonic() + 10_000.0
+        branch.clock = lambda: INLINE_GRACE_SECONDS
         loader.reconcile()
         self.assertFalse(branch.derived().can_write(OUTSIDER, 11, "threads"))
         self.assertNotIn(MEMBER, branch.derived().person_bans)
+        self.assertTrue(branch.is_deleted(granting))
 
-    def test_author_deletions_are_reloaded(self):
-        # The plugin restarted after the owner deleted a granting shard by id;
-        # the shard is gone from storage but the kind 5 remains.
+    def test_unscoped_deleted_authority_replay_is_learned_after_grace(self):
+        for granting in (
+            definition(),
+            shard(OWNER, "thread-creator", [MEMBER]),
+            shard(MOD_GENERAL, "general", [MEMBER], shard_no=2),
+        ):
+            with self.subTest(kind=granting["kind"], author=granting["pubkey"]):
+                # After restart, an e-only kind 5 is outside the bounded scans.
+                events = [event(5, granting["pubkey"], [["e", granting["id"]]])]
+                if granting["kind"] != 32222:
+                    events.append(definition())
+                state, loader, _, _ = make_loader(events)
+                loader.warm_up()
+                branch = state.branch(ADDRESS)
+                branch.clock = lambda: 0.0
+                self.assertFalse(branch.is_deleted(granting))
+                self.assertTrue(rules.evaluate(granting, state, config()).accepted)
+                self.assertTrue(state.apply(granting, inline=True))
+                coord = (branch.definition_coord if granting["kind"] == 32222
+                         else branch.shards[P.get_addressable_address(granting)])
+                # Replays cannot renew grace, even at its exact expiry.
+                for now in (INLINE_GRACE_SECONDS - 1, INLINE_GRACE_SECONDS):
+                    branch.clock = lambda now=now: now
+                    self.assertEqual(state.apply(granting, inline=True), [])
+                    self.assertEqual(branch.inline_seen_at[granting["id"]], 0.0)
+                    if now < INLINE_GRACE_SECONDS:
+                        loader.reconcile()
+                        self.assertIs(coord.current, granting)
+                        self.assertFalse(branch.is_deleted(granting))
+                loader.reconcile()
+                self.assertIsNone(coord.current)
+                self.assertTrue(branch.is_deleted(granting))
+                self.assertIn(granting["id"], branch.deleted_ids[granting["pubkey"]])
+                self.assertNotIn(granting["id"], branch.inline_seen_at)
+                for _ in range(2):
+                    self.assertEqual(rules.evaluate(granting, state, config()).reason, "deleted_replay")
+                    self.assertEqual(state.apply(granting, inline=True), [])
+                    loader.reconcile()
+                    self.assertIsNone(coord.current)
+                # It is an exact-id refusal, not a coordinate tombstone. A
+                # different signed version at the same coordinate still works.
+                fresh = event(granting["kind"], granting["pubkey"], granting["tags"])
+                self.assertTrue(rules.evaluate(fresh, state, config()).accepted)
+                self.assertTrue(state.apply(fresh, inline=True))
+                self.assertIs(coord.current, fresh)
+
+    def test_scoped_deletions_still_reload_event_ids(self):
+        granting = shard(OWNER, "thread-creator", [MEMBER], created_at=2000)
+        for scope in (["h", COMMUNITY], ["a", ADDRESS], ["a", shard_address(OWNER, "thread-creator")]):
+            with self.subTest(scope=scope):
+                # The delete is older than the grant, so only e-id memory (not
+                # an a-tag timestamp tombstone) can reject this replay.
+                delete = event(5, OWNER, [["e", granting["id"]], scope], created_at=1000)
+                state, loader, _, _ = make_loader([definition(), delete])
+                loader.warm_up()
+                branch = state.branch(ADDRESS)
+                self.assertTrue(branch.is_deleted(granting))
+                self.assertEqual(rules.evaluate(granting, state, config()).reason, "deleted_replay")
+                self.assertEqual(state.apply(granting, inline=True), [])
+                self.assertFalse(branch.derived().can_write(MEMBER, 11, "threads"))
+
+    def test_scoped_foreign_deletion_cannot_block_authority(self):
         granting = shard(OWNER, "thread-creator", [MEMBER])
-        events = [definition(), event(5, OWNER, [["e", granting["id"]]])]
-        state, loader, _, _ = make_loader(events)
+        delete = event(5, OUTSIDER, [["e", granting["id"]], ["h", COMMUNITY]])
+        state, loader, _, _ = make_loader([definition(), delete])
+        loader.warm_up()
+        self.assertFalse(state.branch(ADDRESS).is_deleted(granting))
+        self.assertTrue(state.apply(granting, inline=True))
+        self.assertTrue(state.branch(ADDRESS).derived().can_write(MEMBER, 11, "threads"))
+
+    def test_inline_authority_found_in_storage_is_not_marked_deleted(self):
+        state, loader, scanner, _ = make_loader([])
         loader.warm_up()
         branch = state.branch(ADDRESS)
-        self.assertIn(granting["id"], branch.deleted_ids[OWNER])
-        cfg = config()
-        from policy.budabit import rules
+        branch.clock = lambda: 0.0
+        events = [definition(), shard(OWNER, "thread-creator", [MEMBER])]
+        for ev in events:
+            state.apply(ev, inline=True)
+        loader.reconcile()
+        scanner.events = events
+        branch.clock = lambda: INLINE_GRACE_SECONDS
+        loader.reconcile()
+        self.assertTrue(branch.derived().can_write(MEMBER, 11, "threads"))
+        self.assertTrue(all(not branch.is_deleted(ev) for ev in events))
 
-        self.assertEqual(rules.evaluate(granting, state, cfg).reason, "deleted_replay")
-        state.apply(granting, inline=True)
-        self.assertFalse(branch.derived().can_write(MEMBER, 11, "threads"))
+    def test_duplicate_storage_events_do_not_earn_inline_provenance(self):
+        events = standard_events()
+        state, loader, scanner, _ = make_loader(events)
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        for ev in events:
+            self.assertEqual(state.apply(ev, inline=True), [])
+        self.assertEqual(branch.inline_seen_at, {})
+        scanner.events = []
+        loader.reconcile()
+        self.assertFalse(branch.derived().available)
+        self.assertTrue(all(not branch.is_deleted(ev) for ev in events))
+
+    def test_timestamp_cleanup_preserves_current_inline_authority_provenance(self):
+        state, loader, _, _ = make_loader([])
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        branch.clock = lambda: 0.0
+        events = [definition(), shard(OWNER, "thread-creator", [MEMBER])]
+        for ev in events:
+            state.apply(ev, inline=True)
+        # Trigger timestamp cleanup after grace, before the next reconcile.
+        branch.inline_seen_at.update({f"old-{i}": 0.0 for i in range(10000)})
+        branch.clock = lambda: INLINE_GRACE_SECONDS + 1
+        report = person_report(OWNER, OUTSIDER)
+        state.apply(report, inline=True)
+        self.assertEqual(set(branch.inline_seen_at), {ev["id"] for ev in events + [report]})
+        loader.reconcile()
+        for ev in events:
+            self.assertTrue(branch.is_deleted(ev))
+            self.assertEqual(state.apply(ev, inline=True), [])
+
+    def test_failed_scan_does_not_mark_inline_authority_deleted(self):
+        class FailingScanner:
+            def scan(self, filter_obj):
+                raise RuntimeError("scan failed")
+
+        state, loader, _, _ = make_loader([])
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        branch.clock = lambda: 0.0
+        ev = definition()
+        state.apply(ev, inline=True)
+        branch.clock = lambda: INLINE_GRACE_SECONDS
+        loader.scanner = FailingScanner()
+        with self.assertRaisesRegex(RuntimeError, "scan failed"):
+            loader.reconcile()
+        self.assertIs(branch.definition_coord.current, ev)
+        self.assertFalse(branch.is_deleted(ev))
 
     def test_stale_definition_in_storage_does_not_regress(self):
         old = definition(created_at=1_000)
@@ -290,6 +436,56 @@ class StageTests(unittest.TestCase):
         stage, stream = self.make_stage(standard_events(), BUDABIT_DRY_RUN="1")
         self.assertEqual(self.decide(stage, thread(OUTSIDER))["action"], "accept")
         self.assertIn('"event":"would_reject"', stream.getvalue())
+
+    def test_replayed_grant_only_reopens_gate_for_one_grace_window(self):
+        granting = shard(OWNER, "thread-creator", [MEMBER])
+        delete = event(5, OWNER, [["e", granting["id"]]])
+        stage, stream = self.make_stage([definition(), delete])
+        branch = stage.state.branch(ADDRESS)
+        branch.clock = lambda: 0.0
+        self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "reject")
+        # The plugin says yes, but strfry's deletion index refuses to store it.
+        self.assertEqual(self.decide(stage, granting)["action"], "accept")
+        self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "accept")
+        branch.clock = lambda: INLINE_GRACE_SECONDS - 1
+        self.assertEqual(self.decide(stage, granting)["action"], "accept")
+        stage.loader.reconcile()
+        self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "accept")
+        branch.clock = lambda: INLINE_GRACE_SECONDS
+        self.assertEqual(self.decide(stage, granting)["action"], "accept")
+        stage.loader.reconcile()
+        self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "reject")
+        for _ in range(2):
+            self.assertEqual(self.decide(stage, granting)["action"], "reject")
+            stage.loader.reconcile()
+            self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "reject")
+        self.assertIn('"reason":"deleted_replay"', stream.getvalue())
+        self.assertNotIn(granting["id"], branch.inline_seen_at)
+
+    def test_replacement_revocation_never_reopens_gate_on_old_replay(self):
+        for kind in (32222, 30000):
+            with self.subTest(kind=kind):
+                events = standard_events()
+                stage, _ = self.make_stage(events)
+                branch = stage.state.branch(ADDRESS)
+                branch.clock = lambda: 0.0
+                old = (branch.definition_coord.current if kind == 32222 else
+                       branch.shards[shard_address(OWNER, "thread-creator")].current)
+                replacement = (definition(sections=[("Thread-creator", [["k", "11", "threads"]], [])])
+                               if kind == 32222 else shard(OWNER, "thread-creator", []))
+                self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "accept")
+                self.assertEqual(self.decide(stage, replacement)["action"], "accept")
+                stage.loader.scanner.events = [ev for ev in events if ev["id"] != old["id"]] + [replacement]
+                for now in (0.0, INLINE_GRACE_SECONDS):
+                    branch.clock = lambda now=now: now
+                    # strfry refuses the older version; plugin selection must
+                    # likewise leave the revocation current, with no new grace.
+                    self.assertEqual(self.decide(stage, old)["action"], "accept")
+                    self.assertNotIn(old["id"], branch.inline_seen_at)
+                    self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "reject")
+                    stage.loader.reconcile()
+                    self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "reject")
+                self.assertFalse(branch.is_deleted(replacement))
 
     def test_health_and_status(self):
         stage, _ = self.make_stage(standard_events())

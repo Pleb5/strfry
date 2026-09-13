@@ -264,6 +264,13 @@ information document; generated fields are never overridden). Re-run when
 `BUDABIT_BRANCHES` changes. Auto-hosted branches are not listed statically;
 the `auto_host` field names the relay URL instead.
 
+The output also contains `dry_run`, `enforcing`, `configured_branches`, and
+`protected_deletion_kinds`. Dry-run does not claim active enforcement and leaves
+`enforced_branches` empty. Regenerate when changing mode/dry-run as well as the
+branch list. The Dockerfile's old `b80cda3…` core pin predates `relay.info.extra`;
+update the core pin and image tag to a published revision containing that feature
+before deployment. Local code/tests alone do not update the running image.
+
 Audit and sweep (read-only unless `--apply`):
 
 ```bash
@@ -296,7 +303,9 @@ sudo docker compose -f deploy/budabit/compose.yaml exec -T relay \
 
 Append `export` to evaluate with authority taken from the export alone.
 
-To roll back, clear `BUDABIT_BRANCHES` and restart. Nothing stored is removed;
+To roll back, clear both `BUDABIT_BRANCHES` and `BUDABIT_AUTO_HOST_URL`, then
+recreate the relay container (`docker compose ... up -d --no-build --force-recreate relay`).
+Environment changes require recreation, not just `docker compose restart`. Nothing stored is removed;
 the stage only gates new writes.
 
 Deletion requests and NIP-09: strfry treats every `a` tag on a `kind:5` as
@@ -306,6 +315,49 @@ Requests"). A client that still sends the old shape will see its
 retractions rejected ("can't delete other user's events") or, for the
 owner, will tombstone the community definition; publish a fresh definition
 with a newer `created_at` to recover.
+
+#### Deletion replay trade-off
+
+**New-write policy:** kind-5 requests with a `k` tag naming 32222/30000 or an `a`
+coordinate of either kind are rejected with
+`blocked: Deletion of kinds 32222 and 30000 is not allowed` (reason
+`protected_kind_deletion`). This applies to the enabled Budabit stage in both
+modes, even for owners or explicitly tagged unhosted lists. E-only targets
+currently held as definitions/shards are also rejected. Mixed requests are
+rejected whole. Unknown e-only ids cannot be classified by this rule.
+Report-only kind-1984 retractions remain allowed; marked branch `a` context on
+a delete is rejected. Update definitions and list contents by replacement.
+
+The following discussion concerns existing/imported deletions and the accepted
+residual edge case, not permission to submit new protected-kind deletions.
+
+Warm-up and reconcile use coordinate-scoped definition/shard scans and their
+`#a` tombstones, plus community-scoped `#h` deletes and reports. They do **not**
+scan every kind:5 by each authority author. Same-author deleted ids learned
+from those scans or inline writes remain in memory for that branch.
+
+Reconcile also remembers an inline definition/shard id if storage still lacks
+it after the 60 s commit grace. Replaying the same event does not refresh that
+grace, and once remembered, the id cannot restore authority. This costs no
+extra LMDB reads. Absence is a conservative refusal signal, not proof that its
+author deleted it; even an operator-removed inline event can be refused until
+the branch state is recreated. Events seen only in storage are simply dropped.
+
+**Residual risk:** after restart, replaying an event deleted by an e-only kind:5
+outside the scoped scans can temporarily restore its grants. With successful
+reconciliation, this lasts one 60 s grace plus up to
+`BUDABIT_RECONCILE_SECONDS` (about 6 minutes at defaults, plus scan/scheduling
+time), once per id for that in-memory branch. Loader failures can extend it;
+restart or auto-unhosting loses the memory. strfry still refuses the deleted
+authority event, but newly authorized content can be stored during the window.
+A shorter reconcile interval reduces the interval portion, **not** the grace
+or the risk to zero.
+
+For revocation, publish a newer kind:32222/30000 replacement without the grant
+(Budabit's normal flow). New NIP-09 deletion of these coordinates is forbidden;
+existing/imported author-signed `a` tombstones still take effect. Avoid deleting only the current event id and leaving
+the coordinate empty: even strfry can accept a different older version whose
+id was never deleted.
 
 ### Query limits
 

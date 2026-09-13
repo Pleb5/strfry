@@ -28,7 +28,7 @@ class Branch:
         self.owner = owner
         self.community_id = community_id
         self.address = protocol.make_definition_address(owner, community_id)
-        self.deleted_ids = {}  # author pubkey -> set of event ids deleted by that author
+        self.deleted_ids = {}  # author -> ids deleted or inferred refused by storage
         self.definition_coord = Coordinate(self.address, owner, self._deleted_for(owner))
         self.definition = None  # parsed protocol.Definition
         self.shards = {}  # address -> Coordinate
@@ -70,8 +70,16 @@ class Branch:
                 self.inline_seen_at[event["id"]] = self.clock()
                 if len(self.inline_seen_at) > 10000:
                     cutoff = self.clock() - INLINE_GRACE_SECONDS
+                    # Keep inline provenance for current authority events even
+                    # after grace: retain_only needs it to remember refused ids.
+                    current_ids = {
+                        coord.current.get("id")
+                        for coord in (self.definition_coord, *self.shards.values())
+                        if coord.current is not None
+                    }
                     self.inline_seen_at = {
-                        k: v for k, v in self.inline_seen_at.items() if v >= cutoff
+                        k: v for k, v in self.inline_seen_at.items()
+                        if v >= cutoff or k in current_ids
                     }
             return change
 
@@ -79,7 +87,7 @@ class Branch:
         return self.deleted_ids.setdefault(author, set())
 
     def is_deleted(self, event):
-        """True when this event's author has deleted it by id (strfry would refuse it)."""
+        """True for a same-author deleted id or an inline id absent after grace."""
         return event.get("id") in self.deleted_ids.get(event.get("pubkey") or "", ())
 
     def _apply_definition(self, event):
@@ -209,42 +217,36 @@ class Branch:
         seen = self.inline_seen_at.get(event_id)
         return seen is not None and self.clock() - seen < INLINE_GRACE_SECONDS
 
-    def authority_authors(self):
-        """Pubkeys whose kind 5 deletions can affect this branch's authority."""
-        authors = {self.owner}
-        for coord in self.shards.values():
-            authors.add(coord.owner)
-        return authors
-
     def retain_only(self, address, present_ids):
         """Drop the current event at ``address`` if storage no longer holds it.
 
         Called by the loader after scanning a coordinate so that deletions the
         plugin never saw inline (``strfry delete``, imports) converge on the
         next reconcile. Events accepted inline within the grace window are
-        kept because strfry may not have committed them yet.
+        kept because strfry may not have committed them yet. If an inline event
+        is still absent after grace, remember its id as refused by storage so
+        replays cannot repeatedly restore its authority. This avoids scanning
+        every kind 5 by each authority author; absence is a conservative signal,
+        not proof of an author deletion. Storage-only events are just dropped.
         """
         with self.lock:
-            if address == self.address:
-                current = self.definition_coord.current
-                if current is not None and current.get("id") not in present_ids and not self._in_grace(current.get("id")):
-                    self.definition_coord.current = None
-                    self.definition = None
-                    self._sync_shard_coordinates()
-                    self._dirty = True
-                    return "definition_removed"
+            coord = self.definition_coord if address == self.address else self.shards.get(address)
+            if coord is None or coord.current is None:
                 return None
-            coord = self.shards.get(address)
-            if (
-                coord is not None
-                and coord.current is not None
-                and coord.current.get("id") not in present_ids
-                and not self._in_grace(coord.current.get("id"))
-            ):
+            event_id = coord.current.get("id")
+            if event_id in present_ids or self._in_grace(event_id):
+                return None
+            if event_id in self.inline_seen_at:
+                coord.delete_id(event_id)
+                del self.inline_seen_at[event_id]
+            else:
                 coord.current = None
-                self._dirty = True
-                return "shard_removed"
-            return None
+            self._dirty = True
+            if address == self.address:
+                self.definition = None
+                self._sync_shard_coordinates()
+                return "definition_removed"
+            return "shard_removed"
 
     def retain_reports(self, present_ids):
         """Drop tracked reports that storage no longer holds (outside the grace window)."""

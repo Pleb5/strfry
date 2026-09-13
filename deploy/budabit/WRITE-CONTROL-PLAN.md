@@ -229,10 +229,10 @@ branch: `owner`, `moderator(S)` (grant-capable for section S),
 | 30000 (moderator request) | `h` + marked `a`, empty `p` list, empty content | R ≠ banned | Requester-authored; must be accepted from outsiders. Rate-limited by existing buckets. |
 | 30000 `d = app/budabit/renounced-communities` | user preference list | Always (passthrough class) | Renunciations are user-owned; never gate. |
 | 30000 other | — | passthrough | |
-| 5 | Any | Always | strfry only applies same-author deletion; the plugin observes `a`/`e` tombstones for shards, definitions and reports and updates state. Applicants delete their own 1069 this way. |
+| 5 | No protected kind target | Unless any `k`/`a` tag names 32222 or 30000, or an `e` id is a currently tracked definition/shard | Protected targets reject the entire request with `blocked: Deletion of kinds 32222 and 30000 is not allowed` (`protected_kind_deletion`), even for owners and explicitly tagged unhosted coordinates. strfry still enforces same-author deletion for allowed targets. |
 | 1984 event report | `["e"|"a", target, "spam"]`, `content` tag = section S, `h` + marked `a` | owner, moderator(S), **or** grantee/structural-member of the section owning `(1984, ∅)` (member content report queue) | Reporter ≠ target. Non-owner reporting owner/current moderator is still accepted (it will be ignored at render time) — reject only when reporter is banned. Rationale: member reports are review input, and the relay must not suppress evidence. |
 | 1984 person report | `["p", target, "spam"]`, `h` + marked `a` | owner or all-sections-moderator | Others: `blocked: person reports require community-wide moderator authority`. Update `personBans`. |
-| 5 report retraction | `h`, `["e", reportId, "", reporter, "report"]`, `k=1984`; **no** `a` (legacy marked `a` tolerated) | Always (same-author check happens when the delete is matched to a report) | Removes the report from the effective set. |
+| 5 report retraction | `h`, `["e", reportId, "", reporter, "report"]`, `k=1984`; **no** marked branch `a` | Unless mixed with a protected deletion target | Removes the report from the effective set. Legacy marked `a` is still understood in stored history, but new writes carrying it are rejected. |
 | 1985 review label / room archive label | `h` (+ marked `a` where present) | section lookup for `(1985, ∅)` or moderator(any) | Budabit ignores non-authoritative labels. |
 | 30168 admission form | `h` + marked `a`, `content` tag = S | owner or moderator(S) | |
 | 1069 admission response | `h` + marked `a`, form `a` with marker `form` | R ≠ banned | Outsiders apply; must pass. One-active-submission rule is enforced client-side; the plugin only applies rate limits. |
@@ -259,7 +259,7 @@ In strict mode (`BUDABIT_MODE=strict`) passthrough traffic is rejected with
   and Welshman list kinds used by Budabit, when the author has any role other
   than `outsider`/`banned` in at least one hosted branch (matches "Do not
   publish before membership").
-- `kind:5` from anyone (deletions of own content).
+- `kind:5` from anyone, except protected-kind targets in §3.5 (deletions of own content).
 - `kind:1069` / moderator-request `kind:30000` (admission must stay open).
 - Targetable originals (`31922, 31923, 9041, 1623, 30033`) whose author has
   the corresponding grant in at least one hosted branch (they are published
@@ -373,10 +373,14 @@ mtime reload keeps working; it adds `deploy/budabit` to `sys.path`.
 
 - On start, for each configured branch, run
   `strfry --config $STRFRY_CONFIG scan '<filter>'` for:
-  `{"kinds":[32222],"authors":[owner],"#d":[communityId]}`,
-  then for each referenced shard coordinate `{"kinds":[30000],"authors":[a],"#d":[d]}`,
-  then `{"kinds":[1984,5],"#h":[communityId]}` and
-  `{"kinds":[5],"authors":[owner]}` / per shard author for `a` tombstones.
+  `{"kinds":[5],"authors":[owner],"#a":[branchAddress]}` followed by
+  `{"kinds":[32222],"authors":[owner],"#d":[communityId]}`;
+  for each referenced shard coordinate,
+  `{"kinds":[5],"authors":[author],"#a":[shardAddress]}` followed by
+  `{"kinds":[30000],"authors":[author],"#d":[identifier]}`;
+  finally separate `{"kinds":[5],"#h":[communityId]}` and
+  `{"kinds":[1984],"#h":[communityId]}` scans.
+  There is no full kind:5 scan per authority author.
   Parse JSONL output, feed through the same `state.apply(event)` as inline
   updates. Mark branch warm.
 - LMDB permits concurrent readers from another process in the same
@@ -402,8 +406,11 @@ written. Order of operations per request:
 3. If accepted and the event is an authority event (32222, referenced 30000,
    1984, 5), apply it to state using the selection rule. Because strfry may
    still refuse the write (`replaced: have newer event`, `deleted:`), the
-   selection rule guarantees convergence: an older event never displaces the
-   current one in memory either.
+   plugin also checks observed same-author deleted ids. An older event never
+   displaces the current one in memory. Unknown e-id deletions can temporarily
+   diverge from storage when a coordinate is empty; reconcile removes the
+   inline event after grace and remembers its id (§10, Following storage).
+   Only an event that changes state earns grace; replaying it does not renew it.
 4. Respond.
 
 ### 4.5 Rejection messages and reason codes
@@ -446,7 +453,9 @@ definition after warm-up, for the compose health check.
   is trustworthy.
 - **Replacement/deletion** are applied after `accept`; the plugin's in-memory
   selection mirrors strfry's (`created_at` then lowest id on ties —
-  `events.cpp` comparator), so both agree.
+  `events.cpp` comparator). Observed deletions are remembered, but the plugin
+  does not preload strfry's full deletion index; see the bounded-window
+  trade-off under Following storage (§10).
 - **`a`-tag deletions** (NIP-09 addressable) are supported by this strfry
   revision (`events.cpp` handles `a` for kind 5). Shard/definition tombstones
   therefore take effect in storage as well as in the plugin.
@@ -462,7 +471,8 @@ definition after warm-up, for the compose health check.
   `Sync`/`Stream`. Same rules apply; `sourceInfo` is the peer URL, which the
   rate limiter already keys on.
 - **Timeout**: plugin failure yields `error: internal error` and respawn.
-  Because state is rebuilt from LMDB, a respawn costs only the warm-up window.
+  State is rebuilt from scoped LMDB scans. A respawn loses in-memory deletion
+  knowledge that those scans do not cover (§10), as well as costing warm-up.
 - **NIP-70 protected events** are rejected by strfry since NIP-42 is off; no
   plugin involvement.
 - **Kind 41** is treated as replaceable by this revision (runbook note);
@@ -552,8 +562,11 @@ Budabit client-side admission outcomes; then flip dry-run off.
 - **Cross-relay grant race.** A user granted on relay A publishes to relay B
   before the shard reaches B; B rejects with `no_grant`. Budabit publishes
   shards to all community relays concurrently, so the window is small; the
-  client should surface the `blocked:` message and retry rather than treat
-  it as a permanent failure. Track in Budabit.
+  client now shows relay-specific rejection details, explains the permission
+  refresh/propagation step, and offers manual same-event retry. Loading and
+  rate-limit outcomes are distinguished from bans and malformed events; there
+  is no blind automatic retry loop. See Budabit's
+  `docs/architecture/Relay-Publish-Outcomes.md`.
 - **Missing shards on this relay.** Fail-closed grants mean a community whose
   shard never reached this relay rejects all member writes. `--check-policy`
   and the missing-shard warning make this visible; the runbook documents the
@@ -580,19 +593,37 @@ Budabit client-side admission outcomes; then flip dry-run off.
   branch; accepting on definition+grants alone would fail open on stored
   bans. Bootstrap authority events (definitions, referenced shards, kind 5)
   do not wait.
-- **Following storage.** The plugin mirrors what strfry actually does with a
-  `kind:5` (any same-author `e` target or `a` coordinate), including
-  strfry's persistent `(id, author)` deletion index: same-author deleted ids
-  are remembered per branch, reloaded from LMDB for every authority author,
-  and a replay of a deleted definition or shard is refused
-  (`blocked: this event was deleted by its author`) rather than re-admitted
-  into memory. Reconcile drops definitions, shards, and reports that storage
-  no longer holds, with a 60 s grace for events accepted inline that strfry
-  may not have committed yet; the grace is only granted to events that
-  changed state.
-- **Divergence from client rules over time.** Mitigated only by the vector
-  export being part of Budabit's test suite; propose adding it to Budabit
-  CI so rule changes fail loudly when vectors are stale.
+- **Following storage.** Same-author deleted ids learned from kind:5 events
+  seen inline or in the scoped `#a`/`#h` scans are remembered per branch.
+  There is no per-author kind:5 history scan and no complete reload of
+  strfry's persistent deletion index. Reconcile drops definitions, shards,
+  and reports absent from storage, allowing 60 s for inline events to commit.
+  Only state-changing events earn grace; duplicate or rejected replays never
+  refresh it. When reconcile drops an inline definition or shard after grace,
+  it remembers that exact `(id, author)` as refused by storage, preventing
+  repeat resurrection without any additional LMDB reads. Storage-only events
+  are dropped without this inference. Absence is not proof of author deletion:
+  an inline event removed by an operator or otherwise not retained can also
+  be refused for the rest of that branch's in-memory lifetime.
+  After restart, a replay whose e-only deletion is outside the scoped scans
+  can temporarily restore authority for one 60 s grace plus up to one
+  reconcile interval (about 6 minutes at defaults, plus scan/scheduling time),
+  per id while that branch remains in memory. This assumes successful
+  reconciliation; loader failures can extend the window. Restart or
+  auto-unhosting discards this memory. strfry still refuses the deleted event
+  itself, but content authorized during that window can be stored.
+  Normal revocation by a newer kind:32222/30000 replacement is unchanged;
+  `a`-tag coordinate tombstones are also reloaded. Prefer replacement to
+  remove a grant, or an `a`-tag tombstone to remove a coordinate, rather than
+  an e-only deletion leaving the coordinate empty. Exact-id memory does not
+  block a different, older version of the coordinate that was never deleted.
+- **Divergence from client rules over time.** Budabit's dedicated conformance
+  workflow compares a fresh export against the immutable strfry revision in
+  `community-policy-conformance.json`, excluding only separately validated
+  provenance/timestamp metadata. It then runs the pinned relay conformance
+  test against the fresh vectors. The pinned revision must be published before
+  remote CI can check it out. Protected-kind deletion is an additional operator
+  restriction and is covered separately by relay unit/integration tests.
 - **Open: should member content reports (`1984` event reports by grantees)
   be limited to the General section's writers or any section writer?**
   Current client (`canPublishCommunityContentReport`) uses the section that

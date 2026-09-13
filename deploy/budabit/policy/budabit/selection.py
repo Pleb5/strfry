@@ -27,8 +27,8 @@ class Coordinate:
         self.owner = owner
         self.current = None
         self.tombstone_at = None
-        # Shared, same-author set of event ids deleted via kind 5 e tags.
-        # strfry keeps an equivalent persistent index and refuses replays.
+        # Shared, same-author set of ids deleted via observed kind 5 e tags
+        # or inferred refused by storage when an inline event outlives grace.
         self.deleted_ids = deleted_ids if deleted_ids is not None else set()
 
     def offer(self, event):

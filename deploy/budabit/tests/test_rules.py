@@ -276,9 +276,41 @@ class AuthorityEventTests(RulesBase):
         ev = event(30000, OUTSIDER, [["d", "app/budabit/renounced-communities"], ["a", ADDRESS]])
         self.assert_accept(ev, cfg=config(BUDABIT_MODE="strict"))
 
-    def test_delete_always_accepted(self):
-        outcome = self.assert_accept(event(5, OUTSIDER, [["e", "a" * 64]] + authority_tags()))
+    def test_unprotected_delete_accepted(self):
+        outcome = self.assert_accept(event(5, OUTSIDER, [["e", "a" * 64], ["h", COMMUNITY], ["k", "1984"]]))
         self.assertTrue(outcome.authority)
+
+    def test_protected_kind_deletions_rejected_in_both_modes(self):
+        for mode in ("passthrough", "strict"):
+            for kind in ("32222", "30000"):
+                for tag in (["k", kind], ["a", f"{kind}:{OUTSIDER}:unhosted"], ["a", f"{kind}:{OWNER}:{COMMUNITY}", "", "community"]):
+                    for author in (OWNER, OUTSIDER):
+                        with self.subTest(mode=mode, tag=tag, author=author):
+                            # Any protected target rejects the entire mixed delete.
+                            outcome = self.assert_reject(
+                                event(5, author, [["k", "1984"], ["e", "b" * 64], tag]),
+                                "protected_kind_deletion", cfg=config(BUDABIT_MODE=mode),
+                            )
+                            self.assertEqual(outcome.decision.msg, rules.PROTECTED_DELETE_MESSAGE)
+                            self.assertFalse(outcome.authority)
+
+    def test_protected_id_deletions_rejected_without_kind_hint(self):
+        branch = self.state.branch(ADDRESS)
+        for coordinate in (branch.definition_coord, *branch.shards.values()):
+            if coordinate.current:
+                target = coordinate.current
+                self.assert_reject(event(5, target["pubkey"], [["e", target["id"]]]), "protected_kind_deletion")
+
+    def test_protected_tag_deletion_rejected_before_warmup(self):
+        state = CommunityState([ADDRESS])
+        self.assert_reject(event(5, OWNER, [["k", "30000"]]), "protected_kind_deletion", state=state)
+
+    def test_non_delete_events_can_reference_protected_kinds(self):
+        self.assert_accept(event(7, OWNER, [["k", "32222"]] + authority_tags(), "+"))
+
+    def test_similar_kind_numbers_are_not_protected(self):
+        for tag in (["k", "300001"], ["k"], ["k", "not-a-kind"], ["a", f"30009:{OWNER}:badge"]):
+            self.assert_accept(event(5, OWNER, [tag]))
 
 
 class ReportRuleTests(RulesBase):

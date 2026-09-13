@@ -18,6 +18,8 @@ AUTHORITY_KINDS = {
 }
 
 TARGETABLE_KINDS = {31922, 31923, 9041, 1623, 30033}
+PROTECTED_DELETE_KINDS = {P.COMMUNITY_DEFINITION_KIND, P.PROFILE_LIST_KIND}
+PROTECTED_DELETE_MESSAGE = "blocked: Deletion of kinds 32222 and 30000 is not allowed"
 
 PERSONAL_KINDS = {
     0,
@@ -69,6 +71,32 @@ def _tag_value(tags, name):
 
 def _banned(community_id):
     return _reject("blocked: author is moderated in this community", "person_banned", community_id)
+
+
+def _deletes_protected_kind(tags, state):
+    """Reject explicit kind/address targets even outside a hosted branch.
+
+    Also recognise e-only targets currently held in authority state. Unknown
+    event ids carry no kind information; no blocking database lookup is made
+    from the write path. Historical/imported tombstones still inform state.
+    """
+    ids = set()
+    for tag in tags:
+        if len(tag) < 2:
+            continue
+        if tag[0] in ("k", "a"):
+            value = tag[1].split(":", 1)[0] if tag[0] == "a" else tag[1]
+            if value.lstrip("0") in {str(kind) for kind in PROTECTED_DELETE_KINDS}:
+                return True
+        elif tag[0] == "e":
+            ids.add(tag[1])
+    if ids:
+        for branch in list(state.branches.values()):
+            with branch.lock:
+                for coordinate in (branch.definition_coord, *branch.shards.values()):
+                    if coordinate.current and coordinate.current.get("id") in ids:
+                        return True
+    return False
 
 
 # --- per-branch evaluation ---------------------------------------------------
@@ -376,6 +404,8 @@ def evaluate(event, state, config):
         return _passthrough(event, state, config)
 
     if kind == P.DELETE_KIND:
+        if _deletes_protected_kind(tags, state):
+            return _reject(PROTECTED_DELETE_MESSAGE, "protected_kind_deletion")
         return _accept("authority", authority=True, reason="delete")
 
     if kind == P.PROFILE_LIST_KIND:

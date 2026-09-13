@@ -68,7 +68,11 @@ class BudabitWriteControl(Stage):
         payload = {
             "policy_version": self.config.policy_version,
             "mode": "strict" if self.config.strict else "passthrough",
-            "enforced_branches": sorted(self.state.branches),
+            "dry_run": self.config.dry_run,
+            "enforcing": self.config.enabled and not self.config.dry_run,
+            "configured_branches": sorted(self.state.branches),
+            "enforced_branches": [] if self.config.dry_run else sorted(self.state.branches),
+            "protected_deletion_kinds": sorted(rules.PROTECTED_DELETE_KINDS),
         }
         if self.config.auto_host_url:
             payload["auto_host"] = self.config.auto_host_url
