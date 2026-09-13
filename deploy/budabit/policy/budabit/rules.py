@@ -323,6 +323,10 @@ def _strict_passthrough(event, state, config):
     if kind == P.DELETE_KIND:
         return _accept("passthrough", reason="strict_delete")
     branches = list(state.branches.values())
+    if kind in PERSONAL_KINDS or kind in TARGETABLE_KINDS:
+        # Role-based exceptions need the complete snapshot (grants and bans).
+        if any(not branch.warm for branch in branches):
+            return _reject("error: relay policy is loading, retry shortly", "warming_up")
     if kind in PERSONAL_KINDS:
         if any(branch.derived().has_any_role(pubkey) for branch in branches):
             return _accept("passthrough", reason="strict_participant_personal")
@@ -353,6 +357,12 @@ def evaluate(event, state, config):
                 P.parse_definition(event)
             except P.InvalidEvent as error:
                 return _reject(f"invalid: {error}", "invalid_definition", branch.community_id)
+            if branch.is_deleted(event):
+                return _reject(
+                    "blocked: this event was deleted by its author",
+                    "deleted_replay",
+                    branch.community_id,
+                )
             return _accept("authority", branch.community_id, authority=True)
         if config.auto_host_url and address:
             # A valid definition that names this relay becomes a hosted branch
@@ -369,11 +379,10 @@ def evaluate(event, state, config):
         return _accept("authority", authority=True, reason="delete")
 
     if kind == P.PROFILE_LIST_KIND:
-        if P.is_renounced_communities_list(event):
-            return _accept("passthrough", reason="renunciation")
-        # Attribute by the coordinate strfry will store it under (first d tag),
-        # then insist on the exact shard structure so a malformed event cannot
-        # replace a valid shard in storage while slipping past as passthrough.
+        # Attribute by the coordinate strfry will store it under (first d tag)
+        # before any preference-list exception, then insist on the exact shard
+        # structure so a malformed event cannot replace a valid shard in
+        # storage while slipping past as passthrough or as a renunciation.
         coordinate_branches = state.branches_for_coordinate(event)
         if coordinate_branches:
             branch = coordinate_branches[0]
@@ -383,7 +392,15 @@ def evaluate(event, state, config):
                     "invalid_shard",
                     branch.community_id,
                 )
+            if branch.is_deleted(event):
+                return _reject(
+                    "blocked: this event was deleted by its author",
+                    "deleted_replay",
+                    branch.community_id,
+                )
             return _accept("authority", branch.community_id, authority=True)
+        if P.is_renounced_communities_list(event):
+            return _accept("passthrough", reason="renunciation")
         authority = P.parse_authority(tags)
         if authority is not None:
             branch = state.branch(authority.address)

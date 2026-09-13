@@ -164,6 +164,62 @@ def _remove_dot_segments(path):
     return "/" + "/".join(out)
 
 
+def _parse_ipv4_number(text):
+    """WHATWG IPv4 number parser: decimal, 0x hex, or leading-zero octal."""
+    if text == "":
+        return None
+    radix = 10
+    if len(text) >= 2 and text[:2] in ("0x", "0X"):
+        text = text[2:]
+        radix = 16
+    elif len(text) >= 2 and text[0] == "0":
+        text = text[1:]
+        radix = 8
+    if text == "":
+        return 0
+    digits = {10: "0123456789", 16: "0123456789abcdefABCDEF", 8: "01234567"}[radix]
+    if any(ch not in digits for ch in text):
+        return None
+    return int(text, radix)
+
+
+def _ends_in_a_number(host):
+    parts = host.split(".")
+    if parts[-1] == "":
+        if len(parts) == 1:
+            return False
+        parts = parts[:-1]
+    last = parts[-1]
+    if last and all(ch in "0123456789" for ch in last):
+        return True
+    return len(last) >= 2 and last[:2] in ("0x", "0X") and all(
+        ch in "0123456789abcdefABCDEF" for ch in last[2:]
+    )
+
+
+def _parse_ipv4_host(host):
+    """WHATWG IPv4 parser; returns dotted-decimal or None on failure."""
+    parts = host.split(".")
+    if parts[-1] == "" and len(parts) > 1:
+        parts = parts[:-1]
+    if len(parts) > 4:
+        return None
+    numbers = []
+    for part in parts:
+        number = _parse_ipv4_number(part)
+        if number is None:
+            return None
+        numbers.append(number)
+    if any(number > 255 for number in numbers[:-1]):
+        return None
+    if numbers[-1] >= 256 ** (5 - len(numbers)):
+        return None
+    value = numbers[-1]
+    for index, number in enumerate(numbers[:-1]):
+        value += number * 256 ** (3 - index)
+    return ".".join(str((value >> shift) & 0xFF) for shift in (24, 16, 8, 0))
+
+
 def normalize_url(value, schemes):
     """WHATWG-equivalent normalisation for the subset of URLs Communikeys allows.
 
@@ -209,6 +265,12 @@ def normalize_url(value, schemes):
             return None
     elif any(ch not in _HOST_SAFE for ch in host):
         return None
+    elif _ends_in_a_number(host):
+        # WHATWG parses a host whose last label is numeric as IPv4 and fails
+        # the whole URL when that parse fails (e.g. "example.123").
+        host = _parse_ipv4_host(host)
+        if host is None:
+            return None
     if port is not None and str(port) != _DEFAULT_PORTS.get(scheme):
         netloc = f"{host}:{port}"
     else:
@@ -592,10 +654,11 @@ def is_profile_list_declined(event):
 
 
 def is_renounced_communities_list(event):
-    return event.get("kind") == PROFILE_LIST_KIND and any(
-        tag and tag[0] == "d" and len(tag) > 1 and tag[1] == RENOUNCED_COMMUNITIES_DTAG
-        for tag in event.get("tags") or []
-    )
+    """A user's renounced-communities preference list, keyed by its storage coordinate (first d)."""
+    if event.get("kind") != PROFILE_LIST_KIND:
+        return False
+    d_tags = get_tags(event.get("tags") or [], "d")
+    return bool(d_tags) and len(d_tags[0]) > 1 and d_tags[0][1] == RENOUNCED_COMMUNITIES_DTAG
 
 
 def profile_list_pubkeys(event):

@@ -1,7 +1,7 @@
 {
  "format": 1,
- "budabitCommit": "ede779879c8bad5e0e6443f21beac349cd4230df",
- "generatedAt": "2026-09-13T07:53:42.478Z",
+ "budabitCommit": "1695704b074c5b4e66f0030b772f62cfe8bff115",
+ "generatedAt": "2026-09-13T13:14:23.135Z",
  "branches": [
   "32222:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
  ],
@@ -9983,11 +9983,1584 @@
    "valid": true
   },
   {
-   "name": "canonical r with path",
+   "name": "canonical r (IPv4)",
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
     "created_at": 1700000327,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://127.0.0.1"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "cb6a378519005f795f1f0797016ad05c5b6b0245b89d2c6771fd8899f3a022fd",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": true
+  },
+  {
+   "name": "non-canonical r (short IPv4 127.1)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000328,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://127.1"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "4fd92e9b0907a294f18213d3b3c61571ed67ff48ad31b17161adea9a59242f3b",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "non-canonical r (hex IPv4)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000329,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://0x7f000001"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "07e45917e5e1c422b4c0d539370e3ed3df3a3c454bd4b6b44fa83ead54dbad41",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "non-canonical r (octal IPv4)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000330,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://0177.0.0.1"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "836e4e910e4fa89ee36467b7bdacb02d1de03d3e4e47142a827b23632fd45512",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid r (numeric last label)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000331,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://example.123"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "f0eb24bbc0f7741cee6234f12bcf6f847610058d34275c6bb89601951a91a5f3",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid r (IPv4 octet overflow)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000332,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://0.0.0.256"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "2a412a7725234ae6b7a6f1d88657c725eb11a955568b14b45f9b0bb66eb81c3e",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid r (five IPv4 parts)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000333,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://1.2.3.4.5"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "e6be58e0ddcb656ab7563947192c18dc3ed6fb2e118d9547705785afe0b68946",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "canonical r (trailing dot host)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000334,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example."
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "dd5fc6314f6cb0282f06f1fdfc6f1935b5b487461153c407320e08b589fff2d1",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": true
+  },
+  {
+   "name": "non-canonical r (default port)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000335,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example:443"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "22ed5089e74cc93a649597667f4eca0052a93df53b61b34b4a8ea6743b071677",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "canonical r (explicit port)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000336,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example:8443"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "5c97401dc1bf0d2cf76bb19f7ed050993d3d0eda03fe27f24db48e2cc22ad361",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": true
+  },
+  {
+   "name": "non-canonical r (empty path with query)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000337,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example?x=1"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "abfa844adb964e10d291692d2af1456b52f659d39662831e0adbdd89d7250d7d",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "canonical r (path with query)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000338,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example/?x=1"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "d1a03de96b5225cc1339a7d022dd75ca7a64acd2915829d0bfd55acc390d71db",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": true
+  },
+  {
+   "name": "non-canonical r (apostrophe in query)",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000339,
+    "tags": [
+     [
+      "d",
+      "6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e"
+     ],
+     [
+      "name",
+      "Vector Community"
+     ],
+     [
+      "r",
+      "wss://relay.example/?q=it's"
+     ],
+     [
+      "content",
+      "General"
+     ],
+     [
+      "k",
+      "9",
+      "room-message"
+     ],
+     [
+      "k",
+      "1111"
+     ],
+     [
+      "k",
+      "7"
+     ],
+     [
+      "k",
+      "1984"
+     ],
+     [
+      "k",
+      "1985"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general"
+     ],
+     [
+      "a",
+      "30000:7bd1104f8d3eaaa1fa0e8a900d7347de1f4f1f62d29435413601b90529addb1c:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-general.2"
+     ],
+     [
+      "content",
+      "Room-creator"
+     ],
+     [
+      "k",
+      "11",
+      "room"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-room-creator"
+     ],
+     [
+      "content",
+      "Thread-creator"
+     ],
+     [
+      "k",
+      "11",
+      "threads"
+     ],
+     [
+      "a",
+      "30000:b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-thread-creator.2"
+     ],
+     [
+      "content",
+      "Code-curator"
+     ],
+     [
+      "k",
+      "30617"
+     ],
+     [
+      "k",
+      "1623"
+     ],
+     [
+      "a",
+      "30000:948adef90dd7adef121c1911c7aef4761538d492527d88186c95b3533e910b9e:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator"
+     ],
+     [
+      "a",
+      "30000:0ef0bacfc14a6fc25334e9917e0839d71b4400fe5fccdb865cf3715bd2b1fc48:6aaad6d1b92552e004d5cf93548ba72cb4d82e67ccad1a6be7045802eb3e784e-code-curator.2"
+     ],
+     [
+      "content",
+      "Calendar-event-creator"
+     ],
+     [
+      "k",
+      "31922"
+     ],
+     [
+      "k",
+      "31923"
+     ]
+    ],
+    "content": "",
+    "id": "89d06c178bd99c2fbb1a323ee7e05bb70af1e5bc07b05675b339f62904b70493",
+    "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "valid": false
+  },
+  {
+   "name": "canonical r with path",
+   "event": {
+    "kind": 32222,
+    "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
+    "created_at": 1700000340,
     "tags": [
      [
       "d",
@@ -10098,7 +11671,7 @@
      ]
     ],
     "content": "",
-    "id": "cdc77b75ef32043cfe8fbd4e0e50b355e4c89149505cf8b514ca1d1bc12060cd",
+    "id": "cdc917c6b0ae107c9c5fe7ff27ca4ec7c785780d86b8cd0c15069950bdf51f46",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": true
@@ -10108,7 +11681,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000328,
+    "created_at": 1700000341,
     "tags": [
      [
       "d",
@@ -10219,7 +11792,7 @@
      ]
     ],
     "content": "",
-    "id": "899dfe73cb0b8312fea1b35ada6531dce8f4d2914f44fdc74b50cb0b196c7bb8",
+    "id": "85cbe7ade667dc97bf0f8650ddfdc0358987397447f2c9c0c7595e2be2b7bb0f",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10229,7 +11802,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000329,
+    "created_at": 1700000342,
     "tags": [
      [
       "k",
@@ -10344,7 +11917,7 @@
      ]
     ],
     "content": "",
-    "id": "a90aecd09480894bdf47698e446270779654710a4fbe9c2873145969c3b4c071",
+    "id": "1f6c43229f6801b49607fb424791114a7b130cccfc3d932f50e2683f028b1d8f",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10354,7 +11927,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000330,
+    "created_at": 1700000343,
     "tags": [
      [
       "d",
@@ -10469,7 +12042,7 @@
      ]
     ],
     "content": "",
-    "id": "4f5a9e5df6cda8a684ba1289f69fc812b8a5a1e6585c3fb37190957d0d3b4e08",
+    "id": "3463536c0b0dc7dd772d6f0ac1f05b24517602d4d56e74bbd26b8e78a3dde2eb",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10479,7 +12052,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000331,
+    "created_at": 1700000344,
     "tags": [
      [
       "d",
@@ -10598,7 +12171,7 @@
      ]
     ],
     "content": "",
-    "id": "22f11ab5adc0fcaabee82a3a4d18a134fc70ead36d56dc499a164ddb6e66ac43",
+    "id": "06ce65a3449945235aec791ce72ab7b30c8257a5c9665bf3f29226ea6502ba93",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10608,7 +12181,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000332,
+    "created_at": 1700000345,
     "tags": [
      [
       "d",
@@ -10723,7 +12296,7 @@
      ]
     ],
     "content": "",
-    "id": "71d7e200ba0207b91e73d32023b8113da7db1025a3f795a455c89248e7ed1a32",
+    "id": "d6dcaf8d12d5c53af7ba4ac0cb99cfc1716f713118374a9834bdbc9b27833f0b",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10733,7 +12306,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000333,
+    "created_at": 1700000346,
     "tags": [
      [
       "d",
@@ -10856,7 +12429,7 @@
      ]
     ],
     "content": "",
-    "id": "ffd9fa7608055d54d0516a3b70bc06d3938bd8e2363e6e75aefe26bcc1908bc5",
+    "id": "a0b02638b1c78f8bcf4f13b8afa55606e35874acea02a98976721230deb6973b",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10866,7 +12439,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000334,
+    "created_at": 1700000347,
     "tags": [
      [
       "d",
@@ -10977,7 +12550,7 @@
      ]
     ],
     "content": "x",
-    "id": "3be2acf5fd6819074af47cad795a12b9e0f9446e6dd8923c024a97e14aaf79ff",
+    "id": "fb45e21e3badef5e82cfb79110daeae864afc80dc57b5aa398ae3021140e0305",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -10987,7 +12560,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000335,
+    "created_at": 1700000348,
     "tags": [
      [
       "d",
@@ -11098,7 +12671,7 @@
      ]
     ],
     "content": "",
-    "id": "51134453b3892cdd6bbc8b4a7ebadcd968a5dd87f3c97e61b199e161fe1271dd",
+    "id": "be110d67cc24a50ee55462dfc6fedf135c0ed9f94120c069a890802235db9e7e",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
@@ -11108,7 +12681,7 @@
    "event": {
     "kind": 32222,
     "pubkey": "b05422f459098d3d45531c8b70b4f71f4c4d99f5d8cf4781eb8c6c787550a257",
-    "created_at": 1700000336,
+    "created_at": 1700000349,
     "tags": [
      [
       "d",
@@ -11299,7 +12872,7 @@
      ]
     ],
     "content": "",
-    "id": "7822b6d8ae1390799474c0de749c43c0770321c7227a62019675ad582b054eb2",
+    "id": "bf3080820d55e9ba0cac0349d00fbd5c677271b2651fa9a48c49e366cb93e1e6",
     "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
    },
    "valid": false
