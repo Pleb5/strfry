@@ -13,7 +13,9 @@ Usage:
     write-policy.py --check-storage  # exit 1 when the storage guard rejects
     write-policy.py --check-policy   # exit 1 when a hosted branch is not usable
     write-policy.py --status         # print branch state as JSON
-    write-policy.py --replay FILE    # evaluate a JSONL event file offline
+    write-policy.py --replay FILE [lmdb+export|export]
+                                     # evaluate a JSONL export against the community
+                                     # policy only (no rate limits or storage guard)
 """
 
 import json
@@ -26,8 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from policy.budabit.config import BudabitConfig  # noqa: E402
 from policy.budabit.metrics import Metrics  # noqa: E402
+from policy.budabit import rules  # noqa: E402
 from policy.budabit.stage import BudabitWriteControl  # noqa: E402
-from policy.pipeline import Pipeline  # noqa: E402
+from policy.pipeline import Pipeline, Request  # noqa: E402
 from policy.ratelimit import RateLimiter  # noqa: E402
 from policy.storage import StorageGuard  # noqa: E402
 
@@ -77,40 +80,60 @@ def serve(policy):
         print(json.dumps(response, separators=(",", ":")), flush=True)
 
 
-def replay(policy, path):
-    """Offline evaluation of a JSONL export; prints one line per rejected event."""
-    if policy.budabit.loader is not None:
-        policy.budabit.loader.warm_up()
-    counts = {}
+def replay(policy, path, authority="lmdb+export"):
+    """Offline evaluation of a JSONL export against the community policy only.
+
+    Rate limits and the storage guard are not applied; they depend on live
+    traffic and would dominate any sizeable export. Authority state comes from
+    the relay's LMDB (warm-up scan) when the loader is enabled, and the export
+    is replayed in created_at order so authority events it contains take
+    effect for the events that follow them, exactly as they would inline.
+    With ``authority="export"`` LMDB is not consulted.
+
+    Prints one JSON line per event that would be rejected and a summary of
+    decisions by reason on stderr.
+    """
+    stage = policy.budabit
+    if authority == "lmdb+export" and stage.loader is not None:
+        stage.loader.warm_up()
+    else:
+        for branch in stage.state.branches.values():
+            branch.warm = True
+
     with open(path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            event = json.loads(line)
-            request = {
-                "type": "new",
-                "event": event,
-                "receivedAt": int(time.time()),
-                "sourceType": "Import",
-                "sourceInfo": "replay",
-            }
-            _, decision, stage = policy.pipeline.decide(request)
-            key = f"{decision.action}:{stage or ''}:{decision.reason}"
-            counts[key] = counts.get(key, 0) + 1
-            if not decision.accepted:
-                print(
-                    json.dumps(
-                        {
-                            "id": event.get("id"),
-                            "kind": event.get("kind"),
-                            "pubkey": event.get("pubkey"),
-                            "action": decision.action,
-                            "msg": decision.msg,
-                        }
-                    )
+        events = [json.loads(line) for line in handle if line.strip()]
+    events.sort(key=lambda e: (e.get("created_at", 0), e.get("id", "")))
+
+    counts = {}
+    for event in events:
+        raw = {
+            "type": "new",
+            "event": event,
+            "receivedAt": event.get("created_at", 0),
+            "sourceType": "Import",
+            "sourceInfo": "replay",
+        }
+        request = Request.parse(raw)
+        outcome = rules.evaluate(request.event, stage.state, stage.config)
+        key = f"{outcome.decision.action}:{outcome.scope}:{outcome.reason}"
+        counts[key] = counts.get(key, 0) + 1
+        if outcome.accepted:
+            if outcome.authority:
+                stage.state.apply(request.event)
+        else:
+            print(
+                json.dumps(
+                    {
+                        "id": event.get("id"),
+                        "kind": event.get("kind"),
+                        "pubkey": event.get("pubkey"),
+                        "community": outcome.community_id[:8],
+                        "reason": outcome.reason,
+                        "msg": outcome.decision.msg,
+                    }
                 )
-    print(json.dumps(counts, indent=2), file=sys.stderr)
+            )
+    print(json.dumps(dict(sorted(counts.items())), indent=2), file=sys.stderr)
 
 
 def main(argv):
@@ -141,9 +164,13 @@ def main(argv):
         print(json.dumps(policy.budabit.status(), indent=2))
         return
 
-    if len(args) == 2 and args[0] == "--replay":
+    if args and args[0] == "--replay" and len(args) in (2, 3):
+        authority = args[2] if len(args) == 3 else "lmdb+export"
+        if authority not in ("lmdb+export", "export"):
+            print("usage: write-policy.py --replay FILE [lmdb+export|export]", file=sys.stderr)
+            raise SystemExit(2)
         policy = WritePolicy(start_loader=False)
-        replay(policy, args[1])
+        replay(policy, args[1], authority)
         return
 
     if args:

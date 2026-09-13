@@ -254,12 +254,16 @@ Health: the compose health check runs `--check-policy`, which fails when a
 configured branch has no valid definition on this relay or the loader hit an
 error. `--status` prints per-branch state as JSON.
 
-Offline replay of a JSONL export against the current rules:
+Offline replay of a JSONL export against the community policy only (rate
+limits and the storage guard are not applied; authority comes from LMDB plus
+the export itself, replayed in `created_at` order):
 
 ```bash
 sudo docker compose -f deploy/budabit/compose.yaml exec -T relay \
   /usr/local/lib/strfry/write-policy.py --replay /dev/stdin < events.jsonl
 ```
+
+Append `export` to evaluate with authority taken from the export alone.
 
 To roll back, clear `BUDABIT_BRANCHES` and restart. Nothing stored is removed;
 the stage only gates new writes.
@@ -723,9 +727,9 @@ the timer prevented a silent backup failure.
 - Add the administrator `npub` and contact field to NIP-11 metadata.
 - Advertise enforced branches in NIP-11 (plan §3.7) once strfry supports an
   info extension or Caddy serves a static document.
-- Bump `STRFRY_COMMIT` in `Dockerfile` to a revision that includes the
-  Communikeys context a-tag change in `src/events.cpp` before enabling
-  `BUDABIT_BRANCHES` in production.
+- The plugin needs no strfry core change; `STRFRY_COMMIT` in `Dockerfile`
+  may stay at the deployed revision. Bump it deliberately when taking newer
+  upstream fixes, following the upgrade procedure above.
 - Run the Budabit-side golden vector export (plan §8.2) and commit the vectors
   under `deploy/budabit/tests/vectors/`.
 - Add privacy and terms URLs if the relay becomes a community production service.

@@ -537,6 +537,26 @@ Budabit client-side admission outcomes; then flip dry-run off.
   (~800–3,000 `p` per shard) bounds shard size anyway.
 - **Plugin reload on mtime.** Atomic install; state rebuild costs one
   warm-up window with `error:` replies for hosted content.
+- **URL normalisation parity.** `protocol.normalize_url` reproduces the
+  WHATWG serializer for the inputs Communikeys allows (lower-casing, default
+  ports, dot segments, IPv6 compression, trailing slash) and returns None for
+  anything the serializer would percent-encode. For definition `r` tags the
+  client requires the input to already be canonical, so both sides reject
+  the same inputs. For optional relay *hints* the client normalises instead
+  of requiring canonical input, so a hint containing characters the Python
+  side refuses makes the relay reject a definition the client accepts —
+  fail-closed, visible via `--check-policy`, and the case golden vectors
+  must pin.
+- **Warm-up.** Ordinary hosted content is rejected with `error: … loading`
+  until the loader has read definition, shards, *and* reports for the
+  branch; accepting on definition+grants alone would fail open on stored
+  bans. Bootstrap authority events (definitions, referenced shards, kind 5)
+  do not wait.
+- **Following storage.** The plugin mirrors what strfry actually does with a
+  `kind:5` (any same-author `e` target or `a` coordinate), and reconcile
+  drops definitions, shards, and reports that storage no longer holds, with
+  a 60 s grace for events accepted inline that strfry may not have committed
+  yet.
 - **Divergence from client rules over time.** Mitigated only by the vector
   export being part of Budabit's test suite; propose adding it to Budabit
   CI so rule changes fail loudly when vectors are stale.
