@@ -1,17 +1,30 @@
 # Budabit strfry runbook
 
-This document records the Budabit relay deployment completed on 2026-07-13.
-It is both an operations runbook and a record of the decisions and lessons from
-the initial deployment.
+This is the operations runbook for the Budabit relay, initially deployed on
+2026-07-13 and upgraded on 2026-09-13. Current deployment details below supersede
+the initial state. Historical verification is labeled separately.
+
+See [DEPLOYMENT-2026-09-13.md](DEPLOYMENT-2026-09-13.md) for the upgrade evidence,
+checkpoint locations, restore-limit and Compose-path failures, cutover guards,
+and recovery lessons. These records describe the image actually deployed, not
+whichever source commit a later checkout or rebase happens to select.
 
 ## Current status
 
 - Public endpoint: `wss://relay.budabit.club`
 - NIP-11 endpoint: `https://relay.budabit.club`
 - Relay name: `Budabit Community Relay`
-- Initial database: empty; no migration was performed
+- Deployed image: `budabit/strfry:2fc1b38`, binary `v607-2fc1b38`
+- Deployed revision: `2fc1b38e27cfb86775a4ccbe3190019d37e63a9f`
+- Live database: retained in place at upgrade; a separate 4,427-record logical
+  backup was restored and tested without replacing production data
 - Read access: public
-- Write access: public with rate and storage policy controls
+- Write access: public passthrough with rate/storage controls; auto-hosted
+  communities additionally enforce the Budabit policy, with dry-run disabled
+- Auto-host URL: `wss://relay.budabit.club`; explicit branch list empty
+- Verified hosted communities: BudaBit and Test, both valid and warm; all seven
+  BudaBit permission lists present (60 section-grant entries, not unique users)
+- Protected deletion kinds: 30000 and 32222
 - NIP-42: disabled
 - NIP-70 protected events: rejected because NIP-42 is disabled
 - NIP-77 Negentropy: enabled
@@ -53,7 +66,9 @@ separate server was not justified.
 
 | Purpose | Path |
 | --- | --- |
-| Deployment bundle | `/opt/strfry/deploy/budabit` |
+| Deployment bundle (not a Git checkout) | `/opt/strfry/deploy/budabit` |
+| Separately staged source | `/opt/strfry-releases/2fc1b38` |
+| Validated upgrade candidates and isolated-test reports | `/opt/strfry-upgrade/2fc1b38` |
 | Compose file | `/opt/strfry/deploy/budabit/compose.yaml` |
 | Relay configuration | `/opt/strfry/deploy/budabit/strfry.conf` |
 | Live LMDB database | `/var/lib/strfry/db` |
@@ -63,6 +78,12 @@ separate server was not justified.
 | Active Caddy configuration | `/etc/caddy/Caddyfile` |
 | SSH key-only drop-in | `/etc/ssh/sshd_config.d/00-key-only.conf` |
 | Swap sysctl drop-in | `/etc/sysctl.d/99-strfry.conf` |
+
+Do not `git pull` here or replace `/opt/strfry` wholesale. The existing bundle
+contains server-specific configuration, old import files, and logs. Stage source
+elsewhere and replace only reviewed deployment files at cutover. The Python
+policy used by the relay is packaged in the selected image; changing a source
+checkout or the old host-side policy files does not update that image.
 
 The deployment bundle contains:
 
@@ -84,12 +105,24 @@ The deployment bundle contains:
 
 ## Image provenance
 
-The image is built locally as `budabit/strfry:b80cda3` from:
+The current image was built locally as `budabit/strfry:2fc1b38` from:
 
 - Repository: `https://github.com/Pleb5/strfry.git`
-- Commit: `b80cda3a812af1b662223edad47eb70b053508b6`
+- Commit: `2fc1b38e27cfb86775a4ccbe3190019d37e63a9f`
 - Alpine base: `3.22`
 - Alpine digest: `sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce`
+
+The build explicitly supplied `--build-arg STRFRY_COMMIT=2fc1b38e27cfb86775a4ccbe3190019d37e63a9f`.
+The source-controlled deployment templates still default to the old `b80cda3`
+core/image; do not mistake those defaults for the live version. The live Compose
+file instead selects the already-built new image, has no `build` block, and uses
+`pull_policy: never`.
+
+On this shared VPS, a separate `Dockerfile.vps` changed `make -j2` to
+`make -j1 NPROC=1`; its matching `.dockerignore` was copied from the original
+Dockerfile-specific allowlist. This was a resource precaution, not a strfry
+requirement. The old image was not overwritten or removed. Actual image IDs and
+the rollback tag are recorded in the cutover checkpoint's `images.txt`.
 
 The Docker build clones the exact strfry commit. The build context allowlists
 only the Dockerfile and write-policy source, preventing repository metadata,
@@ -218,33 +251,63 @@ unhealthy.
 
 ### Community write control
 
-The Budabit stage of the write policy enforces Communikeys V2 grants for the
-branches listed in `BUDABIT_BRANCHES` (see `WRITE-CONTROL-PLAN.md`). It is
-disabled when that variable is empty; the relay then behaves exactly as
-before.
+The Budabit stage enforces Communikeys V2 grants for explicit
+`BUDABIT_BRANCHES` and/or branches discovered through `BUDABIT_AUTO_HOST_URL`
+(see `WRITE-CONTROL-PLAN.md`). It is disabled only when **both** are empty.
 
-Configuration lives in `compose.yaml` and is read from the shell environment
-or an `.env` file next to it:
+The September deployment uses:
+
+```env
+BUDABIT_AUTO_HOST_URL=wss://relay.budabit.club
+BUDABIT_BRANCHES=
+BUDABIT_MODE=passthrough
+BUDABIT_DRY_RUN=0
+BUDABIT_DISABLE_LOADER=0
+```
+
+Valid kind-32222 definitions whose `r` tags name this relay activate auto-hosting;
+new community creation needs no grant in an existing community. Malformed or
+non-hosting new definitions do not activate enforcement and follow ordinary
+passthrough checks. Invalid updates to an already hosted definition are rejected.
+Auto-hosted branches can be removed on reconciliation if their current definition
+stops naming this relay. Empty explicit branches intentionally permit that.
+
+Configuration lives in `compose.yaml`. The source template exposes substitutions
+from the shell or a neighboring `.env` file. The deployed candidate instead pins
+the five Budabit values above and the two bind-source paths explicitly: changing
+`.env` will not override those literal values. Edit/review the service configuration
+and recreate the container when changing them. Other preserved substitutions
+(for example, storage thresholds) still resolve normally.
+
+The table describes the policy defaults, not a claim that all defaults are live:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `BUDABIT_BRANCHES` | empty | Comma-separated exact `32222:<owner>:<communityId>` addresses to enforce. |
-| `BUDABIT_MODE` | `passthrough` | `passthrough` keeps the public-write relay; `strict` rejects anything not attributable to a hosted community. |
-| `BUDABIT_DRY_RUN` | `0` | `1` accepts everything but logs `would_reject` decisions. Use for rollout. |
+| `BUDABIT_BRANCHES` | empty | Comma-separated exact `32222:<owner>:<communityId>` addresses to enforce, in addition to auto-host discovery. |
+| `BUDABIT_MODE` | `passthrough` | `passthrough` keeps the public-write relay; `strict` is community-only with the documented workflow/personal-kind exceptions. |
+| `BUDABIT_DRY_RUN` | `0` | `1` logs would-be community-policy rejections without enforcing them. Signature, storage, and rate checks still apply. Optional for rollout. |
 | `BUDABIT_REJECT_CENSORED_ADDRESSES` | `0` | Reject replacements at addresses censored by an effective event report. |
 | `BUDABIT_RECONCILE_SECONDS` | `300` | Background reconcile interval against LMDB. |
 | `BUDABIT_AUTO_HOST_URL` | empty | Auto-host: enforce every valid `kind:32222` whose `r` tags name this URL, in addition to `BUDABIT_BRANCHES`. Branches are unhosted again when their current definition stops naming the relay. |
+| `BUDABIT_DISABLE_LOADER` | `0` | Test/offline override only. Never disable the loader on the live relay. |
 
-Rollout order for a branch:
+Rollout gates:
 
-1. Verify the definition and every referenced `kind:30000` shard are stored on
-   this relay: `docker compose -f deploy/budabit/compose.yaml exec relay
-   /usr/local/lib/strfry/write-policy.py --status`. Missing shards are also
-   logged as `shard_missing`; republish them from the Budabit admin panel.
-2. Set `BUDABIT_BRANCHES` with `BUDABIT_DRY_RUN=1`, restart the relay, and
-   watch `would_reject` lines for at least a week. Compare against what the
-   Budabit client hides.
-3. Set `BUDABIT_DRY_RUN=0` and restart.
+1. Have the Budabit relay-error UI ready before enabling enforcement: loading,
+   propagation, bans, invalid events, and permanent failures need distinct
+   feedback rather than blind retries.
+2. Verify the new image on a separate restore, not by mounting the live database
+   into the new binary. Run `write-policy.py --status`; require the expected
+   **exact** addresses with `auto`, `warm`, and `definition` true, and inspect
+   each referenced shard. A zero-grant section with no referenced lists is not
+   a loader failure (this was the Test community's state at cutover).
+3. Run `--check-storage`, `--check-policy`, and test the real HTTP NIP-11 response
+   against the staged configuration. Dry-run is optional; the approved rollout
+   did not require a week-long dry run or a historical audit/sweep. The accepted
+   deletion-replay residual risk below is not an outstanding release gate.
+4. Follow the checkpoint/cutover procedure in the dated upgrade record, then
+   recreate the container to apply image/environment changes. A restart alone
+   is insufficient. Recheck exact branches and public HTTPS after cutover.
 
 Rejections are plain NIP-01 `OK false` replies with stable prefixes:
 `blocked:` (policy), `invalid:` (Communikeys grammar), `rate-limited:`,
@@ -253,9 +316,12 @@ plugin start or reload). The plugin logs one JSON line per rejection and per
 state change (`definition_updated`, `shard_updated`, `report_added`,
 `report_deleted`, `definition_deleted`, `shard_deleted`) to the container log.
 
-Health: the compose health check runs `--check-policy`, which fails when a
-configured branch has no valid definition on this relay or the loader hit an
-error. `--status` prints per-branch state as JSON.
+Health: the Compose check covers HTTP, storage, and `--check-policy`. Policy
+health fails for loading errors or unavailable explicit branches, but can succeed
+with **zero auto-discovered branches**. It also does not require every referenced
+shard to exist. Use `--status` to verify expected addresses and missing lists;
+`shard_missing` warns of unavailable authority. Do not infer enforcement readiness
+from a green container alone.
 
 NIP-11: advertise enforcement so clients and auditors can see it. Generate
 the value with `write-policy.py --nip11-extra` and paste it into
@@ -267,9 +333,12 @@ the `auto_host` field names the relay URL instead.
 The output also contains `dry_run`, `enforcing`, `configured_branches`, and
 `protected_deletion_kinds`. Dry-run does not claim active enforcement and leaves
 `enforced_branches` empty. Regenerate when changing mode/dry-run as well as the
-branch list. The Dockerfile's old `b80cda3…` core pin predates `relay.info.extra`;
-update the core pin and image tag to a published revision containing that feature
-before deployment. Local code/tests alone do not update the running image.
+branch list. The deployed `2fc1b38` binary supports `relay.info.extra`; the
+Dockerfile's old default `b80cda3…` core pin does not. Always select the intended
+core revision and built image explicitly. Local code/tests alone do not update
+the running image. For auto-host-only advertising, omit frozen
+`configured_branches`/`enforced_branches` arrays and retain the dynamic
+`auto_host` rule; the exact deployed payload is in the upgrade record.
 
 Audit and sweep (read-only unless `--apply`):
 
@@ -519,36 +588,42 @@ curl -sS http://127.0.0.1:7777/metrics
 The public `https://relay.budabit.club/metrics` endpoint intentionally returns
 404.
 
-### Restart
+### Restart versus recreate
 
 ```bash
 cd /opt/strfry
 sudo docker compose -f deploy/budabit/compose.yaml restart relay
 ```
 
+This only restarts the existing container. To apply an already-reviewed image or
+environment change, recreate it with `up -d --no-build --pull never --no-deps
+--force-recreate --wait --wait-timeout 180 relay`, after the upgrade checkpoint
+and maintenance guards. Do not use restart as a deployment mechanism.
+
 ### Stop and start
 
 ```bash
 cd /opt/strfry
-sudo docker compose -f deploy/budabit/compose.yaml down
-sudo docker compose -f deploy/budabit/compose.yaml up -d --no-build
+sudo docker compose -f deploy/budabit/compose.yaml stop relay
+sudo docker compose -f deploy/budabit/compose.yaml up -d --no-build --pull never --no-deps relay
 ```
 
-Use `--no-build` for routine starts. `pull_policy: build` intentionally forces
-an explicit local build when Compose is allowed to build, preventing an old
-cached image from silently being treated as a new deployment.
+The live Compose file has `pull_policy: never` and no build block. Use
+`--no-build --pull never` as additional guards against selecting an untested
+image. Scope operations to `relay`; do not take down unrelated services.
 
-### Rebuild the pinned image
+### Build an upgrade separately
 
-```bash
-cd /opt/strfry
-sudo docker compose -f deploy/budabit/compose.yaml build relay
-sudo docker compose -f deploy/budabit/compose.yaml up -d --no-build
-```
+Do not build in `/opt/strfry` or run `git pull` there: it is a deployment bundle,
+not a checkout. Fetch an exact published revision under `/opt/strfry-releases`,
+run its tests, then build under a new tag with an explicit `STRFRY_COMMIT` build
+argument. Preserve the old tag/image and the restrictive Docker context
+allowlist. Keep Compose activation separate from the build.
 
-To upgrade strfry, update both `STRFRY_COMMIT` in `Dockerfile` and the image tag
-in `compose.yaml`, run the tests, take a backup, and then rebuild. Database
-format changes may require logical export/import rather than direct reuse.
+Follow [the upgrade procedure](DEPLOYMENT-2026-09-13.md#repeatable-upgrade-sequence)
+for the isolated restore, candidate comparison, and maintenance cutover.
+Database format changes may require logical export/import rather than direct
+reuse; an older binary must not be assumed to understand a newer database.
 
 ### Manual backup
 
@@ -592,68 +667,41 @@ materially larger than RAM. This reduces unnecessary read-ahead I/O.
 
 ## Restore procedure
 
-Logical JSONL is the preferred portable backup. Perform restores during a
-maintenance window. Do not start the relay until checksum, zstd stream, import,
-and event-count checks have all succeeded.
+Logical JSONL is the portable event backup; a stopped native checkpoint also
+preserves LMDB state that an event-only export does not represent. **First test
+recovery in an isolated directory while production stays running.** Do not move
+or replace the live database just to find out whether an import works.
 
-1. Stop the relay.
-2. Move the current database directory aside rather than deleting it.
-3. Create a new empty directory owned by UID/GID 10001.
-4. Verify the selected checksum and compressed stream.
-5. Count and parse all JSON lines before import.
-6. Import with the already-built local image, without Compose rebuilding it.
-7. Compare the imported database count with the backup line count.
-8. Start the relay only after all checks pass.
+1. Verify the mounted backup destination, checksum, zstd stream, and every JSON
+   record. Measure maximum JSONL line bytes, tags per event, and UTF-8 tag-value
+   bytes without printing event contents.
+2. Create a new root-private scratch directory on disk, with a database
+   subdirectory owned by UID/GID 10001. Do not put the database in the relay's
+   16 MiB `/tmp` tmpfs. Bind mount only the scratch DB and copied configurations.
+3. Use the already-built image with `--pull=never`, `--network=none`, no published
+   ports, non-root UID/GID, and normal container isolation. Feed the root-private
+   export through a host-side pipeline; use `set -euo pipefail`.
+4. If historical records exceed today's limits, create a separate **import-only**
+   config sized to the measured backup. Never relax production write limits or
+   use `--no-verify` to make a restore pass. The September values and a statistics
+   command are in [the upgrade record](DEPLOYMENT-2026-09-13.md#historical-records-can-exceed-current-write-limits).
+5. Inspect import diagnostics and compare `scan --count '{}'` with the parsed
+   backup record count. Stop on errors, skips, or unexplained count differences;
+   a partial import is not a verified restore. Retry in a fresh scratch DB.
+6. Switch back to the original-limit config for count, loader, and HTTP checks.
+   Require expected exact branch addresses and inspect missing permission lists.
+7. Only if actual production recovery is required, arrange a separate maintenance
+   window, pause the relay timers, require maintenance services to be idle, stop
+   the relay, and preserve the current DB before promoting the verified recovery
+   copy. Retain the displaced database and record the potential lost-write window.
 
-Example commands:
-
-```bash
-restore_strfry() (
-set -Eeuo pipefail
-
-cd /opt/strfry
-backup=/mnt/HC_Volume_105751807/backups/strfry/daily/events-YYYYMMDDTHHMMSSZ.jsonl.zst
-backup_dir=$(dirname "$backup")
-backup_name=$(basename "$backup")
-
-cd "$backup_dir"
-sudo sha256sum --check "$backup_name.sha256"
-sudo zstd --test --quiet "$backup"
-expected=$(sudo zstd -dc "$backup" | wc -l)
-sudo zstd -dc "$backup" | python3 -c \
-  'import collections, json, sys; collections.deque((json.loads(line) for line in sys.stdin), maxlen=0)'
-
-cd /opt/strfry
-sudo docker compose -f deploy/budabit/compose.yaml down
-sudo mv /var/lib/strfry/db \
-  "/var/lib/strfry/db.before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/strfry/db
-
-sudo bash -o pipefail -c '
-  zstd -dc "$1" |
-    docker run --rm -i --pull=never \
-      -v /var/lib/strfry/db:/var/lib/strfry/db \
-      -v /opt/strfry/deploy/budabit/strfry.conf:/etc/strfry.conf:ro \
-      budabit/strfry:b80cda3 --config /etc/strfry.conf import
-' _ "$backup"
-
-actual=$(sudo docker run --rm --pull=never \
-  -v /var/lib/strfry/db:/var/lib/strfry/db \
-  -v /opt/strfry/deploy/budabit/strfry.conf:/etc/strfry.conf:ro \
-  budabit/strfry:b80cda3 --config /etc/strfry.conf scan --count '{}')
-printf 'backup events=%s imported events=%s\n' "$expected" "$actual"
-test "$expected" -eq "$actual"
-
-sudo docker compose -f deploy/budabit/compose.yaml up -d --no-build
-
-)
-restore_strfry
-```
-
-Standard import validates event IDs and signatures. Administrative imports do
-not pass through the WebSocket write-policy path and must be treated as trusted
-operations. Strfry can log and skip rejected records without failing the entire
-import, which is why the post-import count comparison is mandatory.
+Standard import validates event IDs and signatures but bypasses the WebSocket
+write policy; treat administrative imports as trusted operations. The importer
+can skip records without returning a failing exit status, so count verification
+and diagnostics are both required. An ordinary image/configuration rollback
+should retain the current DB if the versions are compatible, not discard writes
+by restoring an older checkpoint. The September cutover did **not** promote the
+logical test restore or replace the live database.
 
 ## LMDB compaction
 
@@ -673,6 +721,24 @@ Do not compact while disk space is too low to hold both copies.
 
 ## Rollback
 
+### Image/configuration rollback
+
+Use the verified September checkpoint and retained old image described in
+[the deployment record](DEPLOYMENT-2026-09-13.md#rollback-is-not-a-database-restore).
+Verify the manifest, record/pause the two relay timers, and require their
+services to be idle. Restore only the saved `compose.before.yaml` and
+`strfry.before.conf` to the live deployment paths, then recreate **only** the
+relay with `--no-build --pull never --no-deps --force-recreate --wait`.
+Restore timer states only after health verification. Keep the database in place
+when compatible; restoring `native-db.tar` is a different recovery operation
+that can discard writes since the checkpoint.
+
+The cutover's shell handler was configured to attempt this rollback on failure;
+the successful cutover did not exercise that path. It was not a background
+monitor and stopped existing when the cutover block completed.
+
+### Decommissioning (not upgrade rollback)
+
 To remove the relay without affecting Blossom, GRASP, Chii, or Caddy:
 
 ```bash
@@ -687,9 +753,11 @@ A timestamped pre-strfry Caddyfile backup was created during deployment.
 Do not remove `/var/lib/strfry/db` or the backup volume data until retention and
 recovery requirements have been reviewed.
 
-## Verification performed
+## Verification performed at initial deployment (2026-07-13)
 
-The following checks passed:
+The following checks passed at initial deployment; do not treat them as fresh
+September observations. The [September record](DEPLOYMENT-2026-09-13.md#verification-and-scope)
+lists the later isolated and live checks separately.
 
 - Eight Python policy and retention tests
 - `docker compose config`
@@ -759,8 +827,10 @@ and the standard replaceable ranges. Retention tests explicitly cover it.
 ### A health check must test write safety
 
 An HTTP-only health check can report healthy while every write is being rejected
-because storage is full or unwritable. The deployed health check validates both
-the HTTP listener and the policy storage guard.
+because storage is full or unwritable. The deployed health check validates
+the HTTP listener, storage guard, and policy loader. It still does not prove
+that expected auto-hosted branches or all their permission lists were found;
+verify `--status` explicitly.
 
 ### Bind mounts should fail when host paths are missing
 
@@ -808,27 +878,33 @@ the timer prevented a silent backup failure.
 ## Outstanding work
 
 - Add the administrator `npub` and contact field to NIP-11 metadata.
-- Set `relay.info.extra` from `write-policy.py --nip11-extra` when enabling
-  enforcement, and keep it in sync with `BUDABIT_BRANCHES`.
-- The plugin needs no strfry core change; `STRFRY_COMMIT` in `Dockerfile`
-  may stay at the deployed revision. Bump it deliberately when taking newer
-  upstream fixes, following the upgrade procedure above.
+- Keep the deployed NIP-11 policy claim in sync with mode, dry-run, and hosting
+  configuration. The September auto-host advertisement is installed and verified.
+- Review template defaults deliberately before a future build; the shipped old
+  `STRFRY_COMMIT` default is not the September deployed revision. Do not rebuild
+  or deploy implicitly during documentation or branch maintenance.
 - Regenerate `deploy/budabit/tests/vectors/budabit-policy-vectors.json` from
   Budabit (`POLICY_VECTORS_OUT=... pnpm exec vitest run
   src/app/core/community-policy-vectors.test.ts`) whenever the client's
   permission rules change; the file records the Budabit commit it came from.
 - NIP-34 repository events have no special handling: an `h`-tagged
-  `kind:30617` needs the Code-curator grant; other repository kinds are
+  `kind:30617` needs its current section grant (for example, Code-curator or
+  Repositories); other repository kinds are
   admitted only when a content section lists them (none do by default) and
   are rejected in strict mode without `h`. Repository collaboration belongs
   on GRASP.
 - Add privacy and terms URLs if the relay becomes a community production service.
-- Perform a signed publish and read-back test; read and Negentropy tests passed.
+- If authorized, perform a live signed publish/read-back test. Isolated signed
+  WebSocket tests passed before deployment; no live test events were published
+  during the September cutover.
 - Configure an external HTTPS/WebSocket uptime monitor.
 - Send encrypted backups to an off-provider destination; the current backup
   volume is in the same Hetzner project.
-- Perform and document a full restore drill after the relay contains events.
-- Apply the pending Ubuntu package updates and required reboot, then verify that
+- Repeat isolated restore drills as backup size and formats change. The September
+  4,427-event logical restore and stopped native checkpoint checks are complete;
+  a destructive production database restore was neither needed nor performed.
+- Reassess Ubuntu package updates/reboot requirements (not checked in September),
+  then, if maintenance is needed, verify that
   Caddy, Chii, GRASP, Blossom, Docker, strfry, swap, and timers return correctly.
 - Observe Budabit client queries before tightening `requireAuthorOrTag`; broad
   filters remain enabled for compatibility.

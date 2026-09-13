@@ -3,9 +3,11 @@
 Status: implemented on branch `feat/budabit-write-control` through phase 5
 with one exception: the client-side fetch-profile change that would consume
 an owner-signed enforcement declaration (§3.7 option 2, phase 5) is
-proposed in the docs but not implemented. The production dry-run rollout
-(§6) is an operational step. Target: `deploy/budabit/` on the Pleb5 strfry
-fork (`master`, which tracks upstream `hoytech/strfry` master).
+proposed in the docs but not implemented. Auto-host enforcement was deployed
+on 2026-09-13 with passthrough mode and dry-run disabled; the original mandatory
+week-long dry-run plan is superseded by the verified rollout in
+[DEPLOYMENT-2026-09-13.md](DEPLOYMENT-2026-09-13.md). Target: `deploy/budabit/`
+on the Pleb5 strfry fork (`master`, which tracks upstream `hoytech/strfry` master).
 
 Implementation note discovered during phase 1: strfry treats every `a`
 tag on a `kind:5` as an NIP-09 target and rejects the event when the
@@ -32,11 +34,12 @@ is needed or made; no legacy-shape deletes were found on the live relays.
    under the current community state: authors without a current grant for the
    relevant section, effectively person-banned authors, malformed
    authority-sensitive events, and invalid authority events.
-2. Always accept the signed authority events that define the policy
+2. Accept the authorized signed authority updates that define the policy
    (definitions, referenced profile-list shards, reports, deletions,
    admission and moderator-request workflow events) from the pubkeys entitled
    to publish them, so the relay can bootstrap and follow the community
-   without operator intervention.
+   without operator intervention, except protected-kind deletions forbidden by
+   the operator policy (§3.5).
 3. Keep the relay **disposable and verifiable**: the relay executes signed
    rules, never owns them. Anyone can replay the plugin's decision against
    the signed events. If the relay disappears, Budabit's client-side
@@ -75,7 +78,7 @@ is needed or made; no legacy-shape deletes were found on the live relays.
 | # | Decision | Rationale |
 | - | -------- | --------- |
 | D1 | Python 3, standard library only, same interpreter as the existing `write-policy.py`. | Already in the Alpine image; no new toolchain. Semantic parity with the TypeScript client is guaranteed by golden test vectors exported from Budabit (§8), not by sharing code. |
-| D2 | Enforced communities are an explicit operator list of exact definition addresses `32222:<owner>:<communityId>`. | Communikeys V2: same-ID branches are distinct and "MUST NOT" be selected silently. An exact address is the only unambiguous handle. Auto-hosting by definition `r` tag is a later opt-in (§9, phase 5). |
+| D2 | Hosted communities use exact definition addresses `32222:<owner>:<communityId>`, selected explicitly and/or discovered by valid definition `r` tags matching `BUDABIT_AUTO_HOST_URL`. | Same-ID branches remain distinct. Auto-hosting shipped in phase 5 and is the live September configuration, with an empty explicit list. |
 | D3 | Default mode is **passthrough**: events not attributable to a hosted branch are handed to the existing rate/storage policy only. A **strict** mode rejects them. | `relay.budabit.club` is a public-write relay today; members also publish personal kinds (0, 3, 10002, 10050, 10063, 10000, 30078) there per the publishing policy. Strict mode serves dedicated community relays. |
 | D4 | The plugin learns state from two sources: (a) inline observation of every accepted authority event (it sees every write), and (b) a warm-up/reconcile scan of the relay's own LMDB via `strfry scan` in a background thread. | (a) closes the grant-then-publish race on the same relay with zero latency. (b) survives plugin restarts and covers `strfry import`/`sync`, which bypass or run with different source types. No WebSocket client dependency needed. |
 | D5 | Fail closed for hosted-branch content while state is unknown; fail open for passthrough traffic. | Matches Budabit: "Missing authority evidence fails closed." A transient `error:` reply tells clients to retry. |
@@ -383,11 +386,12 @@ mtime reload keeps working; it adds `deploy/budabit` to `sys.path`.
   There is no full kind:5 scan per authority author.
   Parse JSONL output, feed through the same `state.apply(event)` as inline
   updates. Mark branch warm.
-- LMDB permits concurrent readers from another process in the same
-  container; `strfry scan` opens the environment read-only. The container is
-  read-only rootfs; `scan` needs no writes. Verify `strfry scan` does not
-  attempt to create lock files in a non-writable location (it uses the DB
-  dir, which is writable).
+- LMDB permits concurrent logical reads from another process in the same
+  container, but strfry startup can check/write environment metadata and set up
+  indexes. The DB directory remains writable even with a read-only rootfs.
+  Do not test a new binary against the live DB on the assumption that `scan`
+  (or a read-only bind mount) is a safe compatibility boundary; use an isolated
+  restore first, as described in the deployment record.
 - Reconcile every `BUDABIT_RECONCILE_SECONDS` (default 300) to pick up events
   written via `import`/`sync`, and whenever the current definition changes
   (new shard references may need loading).
@@ -433,7 +437,10 @@ Log one structured line per rejection (`ts kind pubkey[:8] communityId[:8] reaso
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `BUDABIT_BRANCHES` | empty (plugin inert) | Comma-separated exact addresses `32222:<owner>:<communityId>`. |
+| `BUDABIT_BRANCHES` | empty | Comma-separated exact addresses `32222:<owner>:<communityId>`. The stage is inert only when this and `BUDABIT_AUTO_HOST_URL` are both empty. |
+| `BUDABIT_AUTO_HOST_URL` | empty | Discover valid definitions whose `r` tags name this relay; live value is `wss://relay.budabit.club`. |
+| `BUDABIT_DRY_RUN` | `0` | Log would-be rejections without enforcing when set to `1`; not required for the approved September rollout. |
+| `BUDABIT_DISABLE_LOADER` | `0` | Offline/test override only; keep the loader enabled in production. |
 | `BUDABIT_MODE` | `passthrough` | `passthrough` or `strict` (§3.6). |
 | `BUDABIT_REJECT_CENSORED_ADDRESSES` | `0` | §3.5 optional rule. |
 | `BUDABIT_RECONCILE_SECONDS` | `300` | Background reconcile interval. |
@@ -441,9 +448,10 @@ Log one structured line per rejection (`ts kind pubkey[:8] communityId[:8] reaso
 | `STRFRY_CONFIG` | `/etc/strfry.conf` | Already set in compose. |
 | `BUDABIT_POLICY_VERSION` | `1` | Emitted in logs / NIP-11 extension. |
 
-`--check-storage` health CLI stays; add `--check-policy` that prints warm
-status per branch and exits non-zero if any configured branch has no valid
-definition after warm-up, for the compose health check.
+The Compose health check combines HTTP, `--check-storage`, and `--check-policy`.
+Policy health rejects loader errors and unavailable explicit branches, but can
+succeed with no auto-discovered branches or with missing permission lists.
+Require expected exact addresses and inspect shard presence in `--status`.
 
 ---
 
@@ -465,8 +473,8 @@ definition after warm-up, for the compose health check.
   deletes are scoped by `h` only. The relay core is unchanged.
 - **`import`** bypasses the plugin. The reconcile loop re-derives state from
   storage, but imported *content* is not re-validated. The runbook already
-  treats imports as trusted operations; keep it that way and add a
-  `strfry-budabit-audit` dry-run (§7) for after imports.
+  treats imports as trusted operations. An optional audit (§7) is separate
+  from restore integrity checks and is not a prerequisite for deployment.
 - **`sync`/`stream`/`router`** invoke the plugin with `sourceType`
   `Sync`/`Stream`. Same rules apply; `sourceInfo` is the peer URL, which the
   rate limiter already keys on.
@@ -487,17 +495,22 @@ definition after warm-up, for the compose health check.
 - `compose.yaml`: add the `BUDABIT_*` variables; extend the health check with
   `--check-policy`; raise `relay.writePolicy.timeoutSeconds` to 5 in
   `strfry.conf`.
-- `strfry.conf`: no other changes required. If the NIP-11 extension (§3.7
-  option 1) is implemented in strfry core, add `relay.info.extra`.
+- `strfry.conf`: preserve server-specific limits; the implemented NIP-11
+  extension (§3.7 option 1) uses `relay.info.extra` and is deployed in `2fc1b38`.
 - `RUNBOOK.md`: new sections — configuring branches, reading rejection logs,
   what to do when a shard is missing on this relay, how to run the audit and
-  optional sweep, how to roll back to rate-limit-only (`BUDABIT_BRANCHES=`).
+  optional sweep, how to roll back to rate-limit-only (clear both
+  `BUDABIT_BRANCHES` and `BUDABIT_AUTO_HOST_URL`, then recreate the container).
 - `README.md`: one paragraph describing the plugin's role and linking here.
 
-Rollout for `relay.budabit.club`: deploy with `BUDABIT_BRANCHES` set and
-`BUDABIT_MODE=passthrough`, `BUDABIT_DRY_RUN=1` (log decisions, accept
-everything) for at least one week; compare `would_reject` counts against
-Budabit client-side admission outcomes; then flip dry-run off.
+Completed rollout for `relay.budabit.club`: empty `BUDABIT_BRANCHES`,
+`BUDABIT_AUTO_HOST_URL=wss://relay.budabit.club`, `BUDABIT_MODE=passthrough`,
+and `BUDABIT_DRY_RUN=0`. A separately built image passed tests, an isolated
+full-count restore, exact-address/permission-list checks, and real NIP-11 HTTP
+checks. The maintenance cutover took a stopped native checkpoint, recreated
+only the relay, then verified public HTTPS, health, authority state, and timer
+restoration. No mandatory week-long dry run or historical audit/sweep was
+required. See the dated deployment record for checkpoints and safeguards.
 
 ---
 
@@ -540,9 +553,9 @@ Budabit client-side admission outcomes; then flip dry-run off.
    same content accepted immediately (no reconcile wait) → person ban →
    rejected again → ban deleted with kind:5 → accepted. Also: plugin restart
    mid-test rebuilds state from LMDB.
-4. **Replay test**: run `audit.py` against a JSONL export of the live relay
-   (backups exist) in CI-less local mode to sanity-check rejection rates
-   before rollout.
+4. **Optional replay**: `audit.py` can evaluate historical content against
+   current authority, but this is not a restore-integrity check or rollout
+   prerequisite. Any sweep requires separate operator authorization.
 
 ---
 
@@ -553,7 +566,7 @@ Budabit client-side admission outcomes; then flip dry-run off.
 | 0 | Refactor `write-policy.py` into `policy/pipeline.py` + `storage.py` + `ratelimit.py`; move tests. Behaviour unchanged. | Done. |
 | 1 | `protocol.py`, `selection.py`, `state.py`, `loader.py` (warm-up + reconcile), `--check-policy`. Section writer rule, `kind_not_enabled`, strict/passthrough attribution. Dry-run flag. | Done. |
 | 2 | `reports.py`: person-ban fixpoint, report deletes, report authority rules and workflow shapes (§3.5). | Done. |
-| 3 | Budabit-side vector export (`src/app/core/community-policy-vectors.test.ts`) and `tests/test_vectors.py`; NIP-11 via `relay.info.extra`; rollout dry-run → enforce. | Vectors and NIP-11 done. Rollout is operational (§6). |
+| 3 | Budabit-side vector export (`src/app/core/community-policy-vectors.test.ts`) and `tests/test_vectors.py`; NIP-11 via `relay.info.extra`; verified enforcement rollout. | Done. Auto-host enforcement deployed 2026-09-13 (§6). |
 | 4 | `audit.py`, `sweep.py`. | Done. (A strict-mode NIP-34 repo-relay carve-out was considered and rejected: repository events are not community content unless a section lists them; see §3.6.) |
 | 5 | Auto-host mode (`BUDABIT_AUTO_HOST_URL`); owner-signed enforcement declaration; client fetch-profile change. | Auto-host done. Declaration proposed in docs (§3.7); client change not started. |
 
@@ -567,10 +580,10 @@ Budabit client-side admission outcomes; then flip dry-run off.
   rate-limit outcomes are distinguished from bans and malformed events; there
   is no blind automatic retry loop. See Budabit's
   `docs/architecture/Relay-Publish-Outcomes.md`.
-- **Missing shards on this relay.** Fail-closed grants mean a community whose
-  shard never reached this relay rejects all member writes. `--check-policy`
-  and the missing-shard warning make this visible; the runbook documents the
-  fix (republish the shard from Budabit's admin panel).
+- **Missing shards on this relay.** A missing shard contributes no grants;
+  writes relying on those grants fail closed. Policy health alone need not
+  fail: inspect `--status` and missing-shard warnings. The runbook documents
+  the fix (republish the shard from Budabit's admin panel).
 - **Same-ID branches.** Rare, but content without a marked `a` is evaluated
   against all hosted branches with that id (§3.2). Acceptable and documented.
 - **Memory.** State per branch is O(grants + reports); thousands of members
@@ -613,10 +626,11 @@ Budabit client-side admission outcomes; then flip dry-run off.
   auto-unhosting discards this memory. strfry still refuses the deleted event
   itself, but content authorized during that window can be stored.
   Normal revocation by a newer kind:32222/30000 replacement is unchanged;
-  `a`-tag coordinate tombstones are also reloaded. Prefer replacement to
-  remove a grant, or an `a`-tag tombstone to remove a coordinate, rather than
-  an e-only deletion leaving the coordinate empty. Exact-id memory does not
-  block a different, older version of the coordinate that was never deleted.
+  existing/imported `a`-tag coordinate tombstones are also reloaded. New
+  protected-kind deletions are forbidden, so use replacement to remove a grant.
+  Exact-id memory does not block a different, older version of the coordinate
+  that was never deleted. This residual risk was explicitly accepted for the
+  September deployment, not left as an investigation or release gate.
 - **Divergence from client rules over time.** Budabit's dedicated conformance
   workflow compares a fresh export against the immutable strfry revision in
   `community-policy-conformance.json`, excluding only separately validated
@@ -628,8 +642,8 @@ Budabit client-side admission outcomes; then flip dry-run off.
   be limited to the General section's writers or any section writer?**
   Current client (`canPublishCommunityContentReport`) uses the section that
   owns `(1984, ∅)`; the plan follows the client.
-- **Open: NIP-11 extension in strfry core vs Caddy.** Core change is small
-  and upstreamable; Caddy is zero-code. Decide in phase 3.
+- **NIP-11 placement: resolved.** `relay.info.extra` is implemented in strfry
+  core and verified through the public HTTPS route. No Caddy change was needed.
 
 ---
 
