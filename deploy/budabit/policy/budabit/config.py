@@ -21,10 +21,11 @@ class BudabitConfig:
     scan_timeout_seconds: float = 60.0
     policy_version: str = "1"
     loader_enabled: bool = True
+    auto_host_url: str = ""
 
     @property
     def enabled(self):
-        return bool(self.branches)
+        return bool(self.branches) or bool(self.auto_host_url)
 
     @classmethod
     def from_env(cls, env):
@@ -40,6 +41,12 @@ class BudabitConfig:
                 )
             if item not in branches:
                 branches.append(item)
+        auto_host_raw = env.get("BUDABIT_AUTO_HOST_URL", "").strip()
+        auto_host_url = ""
+        if auto_host_raw:
+            auto_host_url = protocol.normalize_relay(auto_host_raw) or ""
+            if not auto_host_url:
+                raise ValueError(f"BUDABIT_AUTO_HOST_URL is not a normalized wss URL: {auto_host_raw}")
         mode = env.get("BUDABIT_MODE", "passthrough").strip().lower()
         if mode not in ("passthrough", "strict"):
             raise ValueError(f"BUDABIT_MODE must be passthrough or strict, got {mode!r}")
@@ -54,4 +61,5 @@ class BudabitConfig:
             scan_timeout_seconds=float(env.get("BUDABIT_SCAN_TIMEOUT_SECONDS", "60")),
             policy_version=env.get("BUDABIT_POLICY_VERSION", "1"),
             loader_enabled=not _flag(env, "BUDABIT_DISABLE_LOADER"),
+            auto_host_url=auto_host_url,
         )

@@ -13,6 +13,7 @@ Usage:
     write-policy.py --check-storage  # exit 1 when the storage guard rejects
     write-policy.py --check-policy   # exit 1 when a hosted branch is not usable
     write-policy.py --status         # print branch state as JSON
+    write-policy.py --nip11-extra    # print the relay.info.extra JSON advertising enforcement
     write-policy.py --replay FILE [lmdb+export|export]
                                      # evaluate a JSONL export against the community
                                      # policy only (no rate limits or storage guard)
@@ -162,6 +163,13 @@ def main(argv):
         if policy.budabit.loader is not None:
             policy.budabit.loader.warm_up()
         print(json.dumps(policy.budabit.status(), indent=2))
+        return
+
+    if args == ["--nip11-extra"]:
+        policy = WritePolicy(start_loader=False)
+        if policy.budabit.loader is not None:
+            policy.budabit.loader.warm_up()
+        print(json.dumps(policy.budabit.nip11_extra(), separators=(",", ":")))
         return
 
     if args and args[0] == "--replay" and len(args) in (2, 3):

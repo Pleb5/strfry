@@ -1,6 +1,7 @@
 """Pipeline stage: Budabit community write control."""
 
 from ..pipeline import Decision, Stage
+from . import protocol as P
 from . import rules
 from .config import BudabitConfig
 from .loader import Loader, StrfryScanner
@@ -19,7 +20,11 @@ class BudabitWriteControl(Stage):
         if config.enabled and config.loader_enabled:
             scanner = scanner or StrfryScanner(config)
             self.loader = Loader(
-                self.state, scanner, self.metrics, reconcile_seconds=config.reconcile_seconds
+                self.state,
+                scanner,
+                self.metrics,
+                reconcile_seconds=config.reconcile_seconds,
+                auto_host_url=config.auto_host_url,
             )
             if start_loader:
                 self.loader.start()
@@ -50,17 +55,33 @@ class BudabitWriteControl(Stage):
         outcome = request.annotations.get("budabit")
         if outcome is None or not outcome.authority:
             return
+        if outcome.reason == "auto_host":
+            address = P.get_addressable_address(request.event)
+            branch = self.state.add_branch(address, auto=True)
+            if branch is not None:
+                self.metrics.log("branch_auto_hosted", community=branch.community_id[:8], address=address)
         for branch, change in self.state.apply(request.event, inline=True):
             self.metrics.state_change(branch, change, request.event)
+
+    def nip11_extra(self):
+        """Suggested `relay.info.extra` JSON advertising this relay's enforcement."""
+        payload = {
+            "policy_version": self.config.policy_version,
+            "mode": "strict" if self.config.strict else "passthrough",
+            "enforced_branches": sorted(self.state.branches),
+        }
+        if self.config.auto_host_url:
+            payload["auto_host"] = self.config.auto_host_url
+        return {"budabit": payload}
 
     def health(self):
         if not self.config.enabled:
             return True, ""
         problems = []
-        for branch in self.state.branches.values():
+        for branch in list(self.state.branches.values()):
             if not branch.warm:
                 problems.append(f"{branch.community_id[:8]} not warm")
-            elif not branch.derived().available:
+            elif not branch.derived().available and not self.state.is_auto(branch.address):
                 problems.append(f"{branch.community_id[:8]} has no valid definition")
         if self.loader is not None and self.loader.last_error:
             problems.append(f"loader: {self.loader.last_error[:120]}")
@@ -68,11 +89,12 @@ class BudabitWriteControl(Stage):
 
     def status(self):
         rows = []
-        for branch in self.state.branches.values():
+        for branch in list(self.state.branches.values()):
             derived = branch.derived()
             rows.append(
                 {
                     "address": branch.address,
+                    "auto": self.state.is_auto(branch.address),
                     "warm": branch.warm,
                     "definition": derived.available,
                     "sections": [s.name for s in derived.definition.sections] if derived.available else [],

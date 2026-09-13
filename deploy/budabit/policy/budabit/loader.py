@@ -50,11 +50,12 @@ class StrfryScanner:
 
 
 class Loader:
-    def __init__(self, state, scanner, metrics, reconcile_seconds=300.0, clock=None, sleep=None):
+    def __init__(self, state, scanner, metrics, reconcile_seconds=300.0, clock=None, sleep=None, auto_host_url=""):
         self.state = state
         self.scanner = scanner
         self.metrics = metrics
         self.reconcile_seconds = reconcile_seconds
+        self.auto_host_url = auto_host_url
         self.clock = clock or time.monotonic
         self.sleep = sleep or time.sleep
         self.stop_event = threading.Event()
@@ -96,8 +97,37 @@ class Loader:
 
     # --- work ---------------------------------------------------------------
 
+    def discover(self):
+        """Auto-host: add branches whose current valid definition names this relay."""
+        url = self.auto_host_url
+        if not url:
+            return
+        definitions = self.scanner.scan({"kinds": [P.COMMUNITY_DEFINITION_KIND]})
+        for event in sorted(definitions, key=lambda e: (e.get("created_at", 0), e.get("id", ""))):
+            try:
+                parsed = P.parse_definition(event)
+            except P.InvalidEvent:
+                continue
+            if url in parsed.relays and self.state.branch(parsed.address) is None:
+                self.state.add_branch(parsed.address, auto=True)
+                self.metrics.log("branch_auto_hosted", community=parsed.community_id[:8], address=parsed.address)
+
+    def unhost_stale(self):
+        """Auto-host: drop branches whose current definition no longer names this relay."""
+        url = self.auto_host_url
+        if not url:
+            return
+        for branch in list(self.state.branches.values()):
+            if not self.state.is_auto(branch.address):
+                continue
+            definition = branch.definition
+            if definition is None or url not in definition.relays:
+                if self.state.remove_branch(branch.address):
+                    self.metrics.log("branch_unhosted", community=branch.community_id[:8], address=branch.address)
+
     def warm_up(self):
-        for branch in self.state.branches.values():
+        self.discover()
+        for branch in list(self.state.branches.values()):
             self.load_branch(branch)
             branch.warm = True
             derived = branch.derived()
@@ -110,13 +140,16 @@ class Loader:
                 bans=len(derived.person_bans),
                 reports=len(branch.reports),
             )
+        self.unhost_stale()
         self.last_reconcile_at = self.clock()
 
     def reconcile(self):
-        for branch in self.state.branches.values():
+        self.discover()
+        for branch in list(self.state.branches.values()):
             branch.needs_reconcile = False
             self.load_branch(branch)
             branch.warm = True
+        self.unhost_stale()
         self.last_reconcile_at = self.clock()
 
     def _apply_all(self, branch, events):

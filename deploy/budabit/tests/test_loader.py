@@ -5,6 +5,7 @@ import unittest
 from fixtures import (
     ADDRESS,
     COMMUNITY,
+    OTHER_COMMUNITY as OTHER_COMMUNITY_ID,
     MEMBER,
     MEMBER2,
     MOD_GENERAL,
@@ -170,6 +171,81 @@ class LoaderTests(unittest.TestCase):
         state, loader, _, _ = make_loader([old, new])
         loader.warm_up()
         self.assertEqual(len(state.branch(ADDRESS).derived().definition.sections), 1)
+
+
+class AutoHostTests(unittest.TestCase):
+    def make(self, events, **overrides):
+        cfg = config(BUDABIT_BRANCHES="", BUDABIT_AUTO_HOST_URL="wss://relay.example", **overrides)
+        cfg.loader_enabled = True
+        stream = io.StringIO()
+        stage = BudabitWriteControl(cfg, metrics=Metrics(stream=stream), scanner=FakeScanner(events), start_loader=False)
+        return stage, stream
+
+    def decide(self, stage, ev):
+        return Pipeline([stage], clock=lambda: 0.0).handle(request(ev))
+
+    def test_discovers_branches_naming_this_relay(self):
+        other = definition(owner=OUTSIDER, community=OTHER_COMMUNITY_ID, relays=("wss://elsewhere.example",))
+        stage, stream = self.make(standard_events() + [other])
+        stage.loader.warm_up()
+        self.assertEqual(sorted(stage.state.branches), [ADDRESS])
+        self.assertTrue(stage.state.is_auto(ADDRESS))
+        self.assertIn("branch_auto_hosted", stream.getvalue())
+        self.assertEqual(self.decide(stage, thread(MEMBER))["action"], "accept")
+        self.assertEqual(self.decide(stage, thread(OUTSIDER))["action"], "reject")
+        # The other community is not hosted here: passthrough.
+        self.assertEqual(self.decide(stage, event(11, OUTSIDER, [["h", OTHER_COMMUNITY_ID]]))["action"], "accept")
+        ok, message = stage.health()
+        self.assertTrue(ok, message)
+        self.assertEqual(stage.nip11_extra()["budabit"]["enforced_branches"], [ADDRESS])
+        self.assertEqual(stage.nip11_extra()["budabit"]["auto_host"], "wss://relay.example")
+
+    def test_inline_definition_hosts_branch_and_loader_warms_it(self):
+        stage, stream = self.make([])
+        stage.loader.warm_up()
+        self.assertEqual(stage.state.branches, {})
+        # Content for an unknown community passes through before hosting.
+        self.assertEqual(self.decide(stage, thread(OUTSIDER))["action"], "accept")
+        self.assertEqual(self.decide(stage, definition())["action"], "accept")
+        self.assertIn(ADDRESS, stage.state.branches)
+        branch = stage.state.branch(ADDRESS)
+        self.assertFalse(branch.warm)
+        # Until the loader has scanned shards and reports, hosted content waits.
+        response = self.decide(stage, thread(OUTSIDER))
+        self.assertEqual(response["action"], "reject")
+        self.assertTrue(response["msg"].startswith("error:"))
+        stage.loader.scanner.events.append(definition())
+        stage.loader.reconcile()
+        self.assertTrue(branch.warm)
+        self.assertEqual(self.decide(stage, thread(OUTSIDER))["action"], "reject")
+        self.assertEqual(self.decide(stage, thread(OWNER))["action"], "accept")
+
+    def test_definition_not_naming_relay_is_passthrough(self):
+        stage, _ = self.make([])
+        stage.loader.warm_up()
+        elsewhere = definition(relays=("wss://elsewhere.example",))
+        self.assertEqual(self.decide(stage, elsewhere)["action"], "accept")
+        self.assertEqual(stage.state.branches, {})
+
+    def test_unhosts_when_relay_removed_from_definition(self):
+        stage, stream = self.make(standard_events())
+        stage.loader.warm_up()
+        self.assertIn(ADDRESS, stage.state.branches)
+        moved = definition(relays=("wss://elsewhere.example",))
+        self.assertEqual(self.decide(stage, moved)["action"], "accept")
+        stage.loader.scanner.events.append(moved)
+        stage.loader.reconcile()
+        self.assertNotIn(ADDRESS, stage.state.branches)
+        self.assertIn("branch_unhosted", stream.getvalue())
+        self.assertEqual(self.decide(stage, thread(OUTSIDER))["action"], "accept")
+
+    def test_explicit_branch_is_never_unhosted(self):
+        cfg = config(BUDABIT_AUTO_HOST_URL="wss://relay.example")
+        cfg.loader_enabled = True
+        stage = BudabitWriteControl(cfg, metrics=Metrics(stream=io.StringIO()), scanner=FakeScanner([definition(relays=("wss://elsewhere.example",))]), start_loader=False)
+        stage.loader.warm_up()
+        self.assertIn(ADDRESS, stage.state.branches)
+        self.assertFalse(stage.state.is_auto(ADDRESS))
 
 
 class StageTests(unittest.TestCase):

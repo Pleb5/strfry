@@ -383,19 +383,67 @@ class Derived:
 
 
 class CommunityState:
-    """All hosted branches, indexed for fast attribution."""
+    """All hosted branches, indexed for fast attribution.
+
+    Explicit branches come from configuration and are never removed. Auto-host
+    branches are added when a valid definition names this relay and removed
+    when its current definition no longer does. Mutation happens under
+    ``lock``; readers iterate over snapshots so the request thread never sees
+    a dict change mid-iteration.
+    """
 
     def __init__(self, addresses):
+        self.lock = threading.RLock()
         self.branches = {}
         self.by_community_id = {}
+        self.auto_addresses = set()
         for address in addresses:
-            parsed = protocol.parse_definition_address(address)
-            if not parsed:
+            if not self.add_branch(address):
                 raise ValueError(f"invalid branch address: {address}")
+
+    def add_branch(self, address, auto=False):
+        """Add a hosted branch. Returns the Branch, or None for an invalid address."""
+        parsed = protocol.parse_definition_address(address)
+        if not parsed:
+            return None
+        with self.lock:
+            existing = self.branches.get(address)
+            if existing is not None:
+                if not auto:
+                    self.auto_addresses.discard(address)
+                return existing
             owner, community_id = parsed
             branch = Branch(owner, community_id)
-            self.branches[branch.address] = branch
-            self.by_community_id.setdefault(community_id, []).append(branch)
+            branch.needs_reconcile = True
+            branches = dict(self.branches)
+            branches[branch.address] = branch
+            by_id = {k: list(v) for k, v in self.by_community_id.items()}
+            by_id.setdefault(community_id, []).append(branch)
+            self.branches = branches
+            self.by_community_id = by_id
+            if auto:
+                self.auto_addresses.add(address)
+            return branch
+
+    def remove_branch(self, address):
+        """Remove an auto-host branch. Explicit branches are never removed."""
+        with self.lock:
+            if address not in self.auto_addresses or address not in self.branches:
+                return False
+            branch = self.branches[address]
+            branches = dict(self.branches)
+            del branches[address]
+            by_id = {k: list(v) for k, v in self.by_community_id.items()}
+            by_id[branch.community_id] = [b for b in by_id.get(branch.community_id, []) if b is not branch]
+            if not by_id[branch.community_id]:
+                del by_id[branch.community_id]
+            self.branches = branches
+            self.by_community_id = by_id
+            self.auto_addresses.discard(address)
+            return True
+
+    def is_auto(self, address):
+        return address in self.auto_addresses
 
     def branch(self, address):
         return self.branches.get(address)
