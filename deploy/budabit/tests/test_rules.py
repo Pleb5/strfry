@@ -274,7 +274,11 @@ class ReportRuleTests(RulesBase):
         self.assert_reject(person_report(OWNER, OWNER), "self_report")
 
     def test_unknown_section(self):
-        self.assert_reject(event_report(OWNER, OUTSIDER, "c" * 64, section="Nope"), "unknown_section")
+        # Owner/members can always file an advisory content report; an
+        # outsider naming an unknown section gets the section error.
+        self.assert_accept(event_report(OWNER, OUTSIDER, "c" * 64, section="Nope"))
+        self.assert_accept(event_report(MEMBER, OUTSIDER, "c" * 64, section="Nope"))
+        self.assert_reject(event_report(OUTSIDER, MEMBER, "c" * 64, section="Nope"), "unknown_section")
 
     def test_malformed_report(self):
         ev = event(1984, OWNER, [["p", OUTSIDER]] + authority_tags())

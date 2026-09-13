@@ -157,6 +157,13 @@ def evaluate_branch(event, branch, config, authority_required):
                 "blocked: a report cannot target its own author", "self_report", community_id
             )
         if report.target == "person":
+            protected = report.target_pubkey == derived.owner or report.target_pubkey in derived.current_moderators
+            if pubkey != derived.owner and protected:
+                return _reject(
+                    "blocked: moderators cannot report the owner or another moderator",
+                    "protected_target",
+                    community_id,
+                )
             if derived.is_all_sections_moderator(pubkey):
                 return _accept("authority", community_id, authority=True)
             return _reject(
@@ -164,18 +171,21 @@ def evaluate_branch(event, branch, config, authority_required):
                 "report_authority",
                 community_id,
             )
+        # Moderator event report for a known section, or a member content
+        # report (advisory) by anyone holding the grant for kind 1984. The
+        # client accepts content reports regardless of the named section.
         section = derived.definition.section_named(report.section_name)
+        if section is not None and derived.is_moderator(pubkey, section):
+            return _accept("authority", community_id, authority=True)
+        report_section = derived.definition.section_for(P.REPORT_KIND)
+        if report_section is not None and derived.can_write_section(pubkey, report_section):
+            return _accept("authority", community_id, authority=True)
         if section is None:
             return _reject(
                 f'blocked: unknown section "{report.section_name}" in report',
                 "unknown_section",
                 community_id,
             )
-        if derived.is_moderator(pubkey, section):
-            return _accept("authority", community_id, authority=True)
-        report_section = derived.definition.section_for(P.REPORT_KIND)
-        if report_section is not None and derived.can_write_section(pubkey, report_section):
-            return _accept("authority", community_id, authority=True)
         return _reject(
             "blocked: content reports require a current community grant",
             "report_authority",
@@ -350,6 +360,15 @@ def evaluate(event, state, config):
             except P.InvalidEvent as error:
                 return _reject(f"invalid: {error}", "invalid_definition", branch.community_id)
             return _accept("authority", branch.community_id, authority=True)
+        if config.auto_host_url and address:
+            # A valid definition that names this relay becomes a hosted branch
+            # on commit (auto-host mode). Invalid ones are ordinary events.
+            try:
+                parsed = P.parse_definition(event)
+            except P.InvalidEvent:
+                parsed = None
+            if parsed is not None and config.auto_host_url in parsed.relays:
+                return _accept("authority", parsed.community_id, authority=True, reason="auto_host")
         return _passthrough(event, state, config)
 
     if kind == P.DELETE_KIND:
