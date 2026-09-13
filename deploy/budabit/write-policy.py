@@ -1,239 +1,157 @@
 #!/usr/bin/env python3
+"""strfry write-policy plugin for the Budabit relay deployment.
+
+Pipeline (first rejection wins):
+
+1. storage guard   - database size / free space
+2. budabit         - Communikeys V2 community write control (when
+                     BUDABIT_BRANCHES is set)
+3. rate limits     - per pubkey, per source, global token buckets
+
+Usage:
+    write-policy.py                  # plugin mode (JSONL on stdin/stdout)
+    write-policy.py --check-storage  # exit 1 when the storage guard rejects
+    write-policy.py --check-policy   # exit 1 when a hosted branch is not usable
+    write-policy.py --status         # print branch state as JSON
+    write-policy.py --replay FILE    # evaluate a JSONL event file offline
+"""
 
 import json
 import os
 import sys
 import time
-from collections import OrderedDict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-class TokenBucket:
-    def __init__(self, capacity, refill_per_second, now):
-        self.capacity = capacity
-        self.refill_per_second = refill_per_second
-        self.tokens = capacity
-        self.updated_at = now
-        self.last_seen = now
-
-    def refill(self, now):
-        elapsed = max(0.0, now - self.updated_at)
-        self.tokens = min(
-            self.capacity,
-            self.tokens + elapsed * self.refill_per_second,
-        )
-        self.updated_at = now
-        self.last_seen = now
+from policy.budabit.config import BudabitConfig  # noqa: E402
+from policy.budabit.metrics import Metrics  # noqa: E402
+from policy.budabit.stage import BudabitWriteControl  # noqa: E402
+from policy.pipeline import Pipeline  # noqa: E402
+from policy.ratelimit import RateLimiter  # noqa: E402
+from policy.storage import StorageGuard  # noqa: E402
 
 
 class WritePolicy:
-    def __init__(self, env=None, clock=None):
+    """Composes the stages. Kept as a class for the health CLI and tests."""
+
+    def __init__(self, env=None, clock=None, start_loader=True, scanner=None):
         env = os.environ if env is None else env
         self.clock = time.monotonic if clock is None else clock
-
-        self.db_file = Path(
-            env.get("STRFRY_POLICY_DB_FILE", "/var/lib/strfry/db/data.mdb")
+        self.metrics = Metrics()
+        self.storage = StorageGuard(env, self.clock)
+        self.budabit = BudabitWriteControl(
+            BudabitConfig.from_env(env),
+            metrics=self.metrics,
+            scanner=scanner,
+            start_loader=start_loader,
         )
-        self.max_db_bytes = int(
-            env.get("STRFRY_POLICY_MAX_DB_BYTES", str(10 * 1024**3))
-        )
-        self.min_free_bytes = int(
-            env.get("STRFRY_POLICY_MIN_FREE_BYTES", str(25 * 1024**3))
-        )
-        self.storage_check_seconds = float(
-            env.get("STRFRY_POLICY_STORAGE_CHECK_SECONDS", "5")
-        )
-
-        self.pubkey_capacity = float(
-            env.get("STRFRY_POLICY_PUBKEY_CAPACITY", "30")
-        )
-        self.pubkey_rate = float(
-            env.get("STRFRY_POLICY_PUBKEY_RATE_PER_MINUTE", "2")
-        ) / 60.0
-        self.ip_capacity = float(env.get("STRFRY_POLICY_IP_CAPACITY", "100"))
-        self.ip_rate = float(
-            env.get("STRFRY_POLICY_IP_RATE_PER_MINUTE", "10")
-        ) / 60.0
-        self.global_capacity = float(
-            env.get("STRFRY_POLICY_GLOBAL_CAPACITY", "200")
-        )
-        self.global_rate = float(
-            env.get("STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE", "20")
-        ) / 60.0
-        self.max_tracked_pubkeys = int(
-            env.get("STRFRY_POLICY_MAX_TRACKED_PUBKEYS", "10000")
-        )
-        self.max_tracked_sources = int(
-            env.get("STRFRY_POLICY_MAX_TRACKED_SOURCES", "4096")
-        )
-
-        now = self.clock()
-        self.global_bucket = TokenBucket(
-            self.global_capacity, self.global_rate, now
-        )
-        self.pubkey_buckets = OrderedDict()
-        self.ip_buckets = OrderedDict()
-        self.storage_result = (True, "")
-        self.storage_checked_at = float("-inf")
-
-    def _bucket(self, buckets, key, capacity, rate, max_entries, now):
-        bucket = buckets.get(key)
-        if bucket is None:
-            if len(buckets) >= max_entries:
-                _, oldest = next(iter(buckets.items()))
-                if now - oldest.last_seen < 3600:
-                    return None
-                buckets.popitem(last=False)
-            bucket = TokenBucket(capacity, rate, now)
-            buckets[key] = bucket
-        else:
-            buckets.move_to_end(key)
-        bucket.refill(now)
-        return bucket
-
-    def _check_storage(self, now):
-        if now - self.storage_checked_at < self.storage_check_seconds:
-            return self.storage_result
-
-        try:
-            db_size = self.db_file.stat().st_size if self.db_file.exists() else 0
-            if db_size >= self.max_db_bytes:
-                result = (False, "blocked: relay storage budget reached")
-            else:
-                if not os.access(self.db_file.parent, os.W_OK):
-                    result = (False, "blocked: relay database is not writable")
-                else:
-                    stat = os.statvfs(self.db_file.parent)
-                    free_bytes = stat.f_bavail * stat.f_frsize
-                    if free_bytes < self.min_free_bytes:
-                        result = (
-                            False,
-                            "blocked: relay filesystem is low on space",
-                        )
-                    else:
-                        result = (True, "")
-        except OSError as error:
-            print(f"storage check failed: {error}", file=sys.stderr, flush=True)
-            result = (False, "blocked: relay storage check failed")
-
-        self.storage_checked_at = now
-        self.storage_result = result
-        return result
+        self.ratelimit = RateLimiter(env, self.clock)
+        self.pipeline = Pipeline([self.storage, self.budabit, self.ratelimit], self.clock)
 
     def handle(self, request):
-        event = request.get("event", {})
-        event_id = event.get("id", "")
+        return self.pipeline.handle(request)
 
-        if request.get("type") != "new" or not event_id:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "blocked: invalid policy request",
+    def _check_storage(self, now=None):
+        return self.storage.check(now)
+
+
+def _fail_response(event_id, msg):
+    return {"id": event_id, "action": "reject", "msg": msg}
+
+
+def serve(policy):
+    for line in sys.stdin:
+        request = None
+        try:
+            request = json.loads(line)
+            response = policy.handle(request)
+        except Exception as error:  # noqa: BLE001 - never let the plugin die
+            print(f"policy request failed: {error}", file=sys.stderr, flush=True)
+            event_id = ""
+            try:
+                event_id = (request or {}).get("event", {}).get("id", "")
+            except Exception:  # noqa: BLE001
+                pass
+            response = _fail_response(event_id, "blocked: policy failure")
+        print(json.dumps(response, separators=(",", ":")), flush=True)
+
+
+def replay(policy, path):
+    """Offline evaluation of a JSONL export; prints one line per rejected event."""
+    if policy.budabit.loader is not None:
+        policy.budabit.loader.warm_up()
+    counts = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            event = json.loads(line)
+            request = {
+                "type": "new",
+                "event": event,
+                "receivedAt": int(time.time()),
+                "sourceType": "Import",
+                "sourceInfo": "replay",
             }
-
-        now = self.clock()
-        storage_ok, storage_message = self._check_storage(now)
-        if not storage_ok:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": storage_message,
-            }
-
-        self.global_bucket.refill(now)
-        if self.global_bucket.tokens < 1:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "rate-limited: relay write limit exceeded",
-            }
-
-        source = (
-            f"{request.get('sourceType', 'unknown')}:"
-            f"{request.get('sourceInfo', 'unknown')}"
-        )
-        source_bucket = self._bucket(
-            self.ip_buckets,
-            source,
-            self.ip_capacity,
-            self.ip_rate,
-            self.max_tracked_sources,
-            now,
-        )
-        if source_bucket is None:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "rate-limited: source tracking limit reached",
-            }
-        if source_bucket.tokens < 1:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "rate-limited: source write limit exceeded",
-            }
-
-        pubkey = event.get("pubkey", "unknown")
-        pubkey_bucket = self._bucket(
-            self.pubkey_buckets,
-            pubkey,
-            self.pubkey_capacity,
-            self.pubkey_rate,
-            self.max_tracked_pubkeys,
-            now,
-        )
-        if pubkey_bucket is None:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "rate-limited: pubkey tracking limit reached",
-            }
-        if pubkey_bucket.tokens < 1:
-            return {
-                "id": event_id,
-                "action": "reject",
-                "msg": "rate-limited: pubkey write limit exceeded",
-            }
-
-        for bucket in (pubkey_bucket, source_bucket, self.global_bucket):
-            bucket.tokens -= 1
-
-        return {"id": event_id, "action": "accept"}
+            _, decision, stage = policy.pipeline.decide(request)
+            key = f"{decision.action}:{stage or ''}:{decision.reason}"
+            counts[key] = counts.get(key, 0) + 1
+            if not decision.accepted:
+                print(
+                    json.dumps(
+                        {
+                            "id": event.get("id"),
+                            "kind": event.get("kind"),
+                            "pubkey": event.get("pubkey"),
+                            "action": decision.action,
+                            "msg": decision.msg,
+                        }
+                    )
+                )
+    print(json.dumps(counts, indent=2), file=sys.stderr)
 
 
-def main():
-    policy = WritePolicy()
+def main(argv):
+    args = argv[1:]
 
-    if sys.argv[1:] == ["--check-storage"]:
-        storage_ok, message = policy._check_storage(policy.clock())
-        if not storage_ok:
+    if args == ["--check-storage"]:
+        policy = WritePolicy(start_loader=False)
+        ok, message = policy._check_storage()
+        if not ok:
             print(message, file=sys.stderr)
             raise SystemExit(1)
         return
 
-    if len(sys.argv) > 1:
-        print("usage: write-policy.py [--check-storage]", file=sys.stderr)
+    if args == ["--check-policy"]:
+        policy = WritePolicy(start_loader=False)
+        if policy.budabit.loader is not None:
+            policy.budabit.loader.warm_up()
+        ok, message = policy.budabit.health()
+        if not ok:
+            print(message, file=sys.stderr)
+            raise SystemExit(1)
+        return
+
+    if args == ["--status"]:
+        policy = WritePolicy(start_loader=False)
+        if policy.budabit.loader is not None:
+            policy.budabit.loader.warm_up()
+        print(json.dumps(policy.budabit.status(), indent=2))
+        return
+
+    if len(args) == 2 and args[0] == "--replay":
+        policy = WritePolicy(start_loader=False)
+        replay(policy, args[1])
+        return
+
+    if args:
+        print(__doc__, file=sys.stderr)
         raise SystemExit(2)
 
-    for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            response = policy.handle(request)
-        except Exception as error:
-            print(f"policy request failed: {error}", file=sys.stderr, flush=True)
-            event_id = ""
-            try:
-                event_id = request.get("event", {}).get("id", "")
-            except Exception:
-                pass
-            response = {
-                "id": event_id,
-                "action": "reject",
-                "msg": "blocked: policy failure",
-            }
-
-        print(json.dumps(response, separators=(",", ":")), flush=True)
+    serve(WritePolicy())
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv)

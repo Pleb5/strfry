@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).with_name("retention.py")
+MODULE_PATH = Path(__file__).resolve().parents[1] / "retention.py"
 SPEC = importlib.util.spec_from_file_location("retention", MODULE_PATH)
 retention = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(retention)

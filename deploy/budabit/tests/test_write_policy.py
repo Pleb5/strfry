@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 
-MODULE_PATH = Path(__file__).with_name("write-policy.py")
+MODULE_PATH = Path(__file__).resolve().parents[1] / "write-policy.py"
 SPEC = importlib.util.spec_from_file_location("write_policy", MODULE_PATH)
 write_policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(write_policy)
@@ -52,7 +52,7 @@ class WritePolicyTests(unittest.TestCase):
     def policy(self, **overrides):
         env = dict(self.env)
         env.update(overrides)
-        return write_policy.WritePolicy(env=env, clock=self.clock)
+        return write_policy.WritePolicy(env=env, clock=self.clock, start_loader=False)
 
     def test_accepts_event_within_limits(self):
         response = self.policy().handle(self.request())
