@@ -213,15 +213,47 @@ class AuthorityEventTests(RulesBase):
     def test_e_tag_deletion_of_shard_and_definition(self):
         granting = shard(OWNER, "thread-creator", [MEMBER])
         state = warm_state([definition()] + [granting])
+        branch = state.branch(ADDRESS)
         self.assert_accept(thread(MEMBER), state=state)
         state.apply(event(5, OWNER, [["e", granting["id"]]]))
         self.assert_reject(thread(MEMBER), "no_grant", state=state)
-        # Someone else's e-tag delete of the owner's event does nothing.
-        state.apply(granting)
-        state.apply(event(5, OUTSIDER, [["e", granting["id"]]]))
+        # Replaying the deleted shard must not resurrect the grant: strfry's
+        # deletion index refuses it, and so does the plugin.
+        self.assert_reject(granting, "deleted_replay", state=state)
+        state.apply(granting, inline=True)
+        self.assert_reject(thread(MEMBER), "no_grant", state=state)
+        self.assertNotIn(granting["id"], branch.inline_seen_at)
+        # A fresh shard (new id) from the owner works as usual.
+        state.apply(shard(OWNER, "thread-creator", [MEMBER]))
         self.assert_accept(thread(MEMBER), state=state)
-        state.apply(event(5, OWNER, [["e", state.branch(ADDRESS).definition.event["id"]]]))
+        # Someone else's e-tag delete of the owner's event does nothing.
+        state.apply(event(5, OUTSIDER, [["e", branch.shards[shard_address(OWNER, "thread-creator")].current["id"]]]))
+        self.assert_accept(thread(MEMBER), state=state)
+        definition_id = branch.definition.event["id"]
+        state.apply(event(5, OWNER, [["e", definition_id]]))
         self.assert_reject(thread(MEMBER), "definition_unavailable", state=state)
+        self.assertIsNone(branch.definition)
+
+    def test_deleted_definition_cannot_be_replayed(self):
+        first = definition()
+        state = warm_state([first])
+        self.assert_accept(thread(OWNER), state=state)
+        state.apply(event(5, OWNER, [["e", first["id"]]]))
+        self.assert_reject(first, "deleted_replay", state=state)
+        state.apply(first)
+        self.assert_reject(thread(OWNER), "definition_unavailable", state=state)
+        self.assert_accept(definition(), state=state)
+
+    def test_renunciation_cannot_mask_a_referenced_shard(self):
+        forged = shard(OWNER, "thread-creator", [OUTSIDER])
+        forged["tags"].append(["d", "app/budabit/renounced-communities"])
+        self.assert_reject(forged, "invalid_shard")
+        # A genuine renunciation list (first d is the preference coordinate) passes.
+        renounce = event(30000, OUTSIDER, [["d", "app/budabit/renounced-communities"], ["a", ADDRESS]])
+        self.assert_accept(renounce)
+        # ...but not with a hosted coordinate hidden behind it.
+        masked = event(30000, OWNER, [["d", f"{COMMUNITY}-thread-creator"], ["d", "app/budabit/renounced-communities"], ["p", OUTSIDER]])
+        self.assert_reject(masked, "invalid_shard")
 
     def test_e_tag_deletion_of_report(self):
         report = person_report(OWNER, MEMBER)
@@ -439,6 +471,17 @@ class StrictModeTests(RulesBase):
     def test_hosted_content_still_evaluated(self):
         self.assert_accept(thread(MEMBER))
         self.assert_reject(thread(OUTSIDER), "no_grant")
+
+    def test_strict_exceptions_wait_for_warm_up(self):
+        state = CommunityState([ADDRESS])
+        for ev in standard_events():
+            state.apply(ev)
+        self.assert_reject(event(31922, OWNER, [["h", "targeting"], ["d", "cal"]]), "warming_up", state=state)
+        self.assert_reject(event(0, MEMBER, [], "{}"), "warming_up", state=state)
+        self.assert_accept(event(5, OUTSIDER, [["e", "a" * 64]]), state=state)
+        for branch in state.branches.values():
+            branch.warm = True
+        self.assert_accept(event(31922, OWNER, [["h", "targeting"], ["d", "cal"]]), state=state)
 
 
 class SameIdBranchTests(unittest.TestCase):

@@ -210,6 +210,13 @@ class Loader:
                 self._apply_all(branch, shard_events)
                 self._retain(branch, address, shard_events)
 
+        # Every kind 5 by an authority author: strfry's deletion index means a
+        # deleted definition or shard can never be re-stored, so the plugin
+        # must remember those ids too (a revoked member could otherwise replay
+        # an old signed grant into the plugin's memory).
+        for author in sorted(branch.authority_authors()):
+            self._apply_all(branch, self.scanner.scan({"kinds": [P.DELETE_KIND], "authors": [author]}))
+
         # Reports and community-scoped deletes. Deletes first so a report and
         # its retraction are both known before derivation.
         self._apply_all(

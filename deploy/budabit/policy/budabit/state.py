@@ -28,7 +28,8 @@ class Branch:
         self.owner = owner
         self.community_id = community_id
         self.address = protocol.make_definition_address(owner, community_id)
-        self.definition_coord = Coordinate(self.address, owner)
+        self.deleted_ids = {}  # author pubkey -> set of event ids deleted by that author
+        self.definition_coord = Coordinate(self.address, owner, self._deleted_for(owner))
         self.definition = None  # parsed protocol.Definition
         self.shards = {}  # address -> Coordinate
         self.reports = {}  # report id -> event
@@ -52,23 +53,34 @@ class Branch:
         period before treating their absence from a scan as a deletion.
         """
         with self.lock:
-            if inline and event.get("id"):
+            kind = event.get("kind")
+            if kind == protocol.COMMUNITY_DEFINITION_KIND:
+                change = self._apply_definition(event)
+            elif kind == protocol.PROFILE_LIST_KIND:
+                change = self._apply_shard(event)
+            elif kind == protocol.REPORT_KIND:
+                change = self._apply_report(event)
+            elif kind == protocol.DELETE_KIND:
+                change = self._apply_delete(event)
+            else:
+                change = None
+            # Only an event that actually changed state earns the reconcile
+            # grace; a rejected replay of a deleted event must not.
+            if inline and change and event.get("id"):
                 self.inline_seen_at[event["id"]] = self.clock()
                 if len(self.inline_seen_at) > 10000:
                     cutoff = self.clock() - INLINE_GRACE_SECONDS
                     self.inline_seen_at = {
                         k: v for k, v in self.inline_seen_at.items() if v >= cutoff
                     }
-            kind = event.get("kind")
-            if kind == protocol.COMMUNITY_DEFINITION_KIND:
-                return self._apply_definition(event)
-            if kind == protocol.PROFILE_LIST_KIND:
-                return self._apply_shard(event)
-            if kind == protocol.REPORT_KIND:
-                return self._apply_report(event)
-            if kind == protocol.DELETE_KIND:
-                return self._apply_delete(event)
-            return None
+            return change
+
+    def _deleted_for(self, author):
+        return self.deleted_ids.setdefault(author, set())
+
+    def is_deleted(self, event):
+        """True when this event's author has deleted it by id (strfry would refuse it)."""
+        return event.get("id") in self.deleted_ids.get(event.get("pubkey") or "", ())
 
     def _apply_definition(self, event):
         if protocol.get_addressable_address(event) != self.address:
@@ -94,7 +106,7 @@ class Branch:
             referenced[ref.address] = ref
         for address, ref in referenced.items():
             if address not in self.shards:
-                coord = Coordinate(address, ref.owner)
+                coord = Coordinate(address, ref.owner, self._deleted_for(ref.owner))
                 self.shards[address] = coord
                 for delete in self.pending_tombstones:
                     if address in protocol.tombstone_addresses(delete):
@@ -130,7 +142,7 @@ class Branch:
         if not authority or authority.address != self.address:
             return None
         report_id = event.get("id")
-        if not report_id or report_id in self.reports:
+        if not report_id or report_id in self.reports or self.is_deleted(event):
             return None
         self.reports[report_id] = event
         self._dirty = True
@@ -142,26 +154,31 @@ class Branch:
         deleted_ids = {
             tag[1] for tag in protocol.get_tags(event.get("tags") or [], "e") if len(tag) > 1
         }
-        if deleted_ids:
-            # strfry removes any same-author event named by an e tag. Mirror
-            # that for the definition, shards, and reports we track.
-            current = self.definition_coord.current
-            if current is not None and current.get("id") in deleted_ids and current.get("pubkey") == deleter:
-                self.definition_coord.current = None
-                self.definition = None
-                self._sync_shard_coordinates()
-                self._dirty = True
-                changed = "definition_deleted"
+        if deleted_ids and deleter:
+            # strfry removes any same-author event named by an e tag and keeps
+            # a persistent (id, author) deletion index that refuses replays.
+            # Mirror both: drop what we track now and remember the ids.
+            tracked = self._deleted_for(deleter)
+            before = len(tracked)
+            tracked.update(deleted_ids)
+            if len(tracked) != before:
+                changed = "ids_deleted"
+            if self.definition_coord.owner == deleter:
+                for event_id in deleted_ids:
+                    if self.definition_coord.delete_id(event_id):
+                        self.definition = None
+                        self._sync_shard_coordinates()
+                        changed = "definition_deleted"
             for coord in self.shards.values():
-                if coord.current is not None and coord.current.get("id") in deleted_ids and coord.current.get("pubkey") == deleter:
-                    coord.current = None
-                    self._dirty = True
-                    changed = changed or "shard_deleted"
+                if coord.owner == deleter:
+                    for event_id in deleted_ids:
+                        if coord.delete_id(event_id):
+                            changed = "shard_deleted"
             for report_id in list(self.reports):
                 if report_id in deleted_ids and self.reports[report_id].get("pubkey") == deleter:
                     del self.reports[report_id]
-                    self._dirty = True
-                    changed = changed or "report_deleted"
+                    changed = "report_deleted"
+            self._dirty = True
         for address in protocol.tombstone_addresses(event):
             if address == self.address:
                 if self.definition_coord.tombstone(event):
@@ -191,6 +208,13 @@ class Branch:
     def _in_grace(self, event_id):
         seen = self.inline_seen_at.get(event_id)
         return seen is not None and self.clock() - seen < INLINE_GRACE_SECONDS
+
+    def authority_authors(self):
+        """Pubkeys whose kind 5 deletions can affect this branch's authority."""
+        authors = {self.owner}
+        for coord in self.shards.values():
+            authors.add(coord.owner)
+        return authors
 
     def retain_only(self, address, present_ids):
         """Drop the current event at ``address`` if storage no longer holds it.

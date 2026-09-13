@@ -581,10 +581,15 @@ Budabit client-side admission outcomes; then flip dry-run off.
   bans. Bootstrap authority events (definitions, referenced shards, kind 5)
   do not wait.
 - **Following storage.** The plugin mirrors what strfry actually does with a
-  `kind:5` (any same-author `e` target or `a` coordinate), and reconcile
-  drops definitions, shards, and reports that storage no longer holds, with
-  a 60 s grace for events accepted inline that strfry may not have committed
-  yet.
+  `kind:5` (any same-author `e` target or `a` coordinate), including
+  strfry's persistent `(id, author)` deletion index: same-author deleted ids
+  are remembered per branch, reloaded from LMDB for every authority author,
+  and a replay of a deleted definition or shard is refused
+  (`blocked: this event was deleted by its author`) rather than re-admitted
+  into memory. Reconcile drops definitions, shards, and reports that storage
+  no longer holds, with a 60 s grace for events accepted inline that strfry
+  may not have committed yet; the grace is only granted to events that
+  changed state.
 - **Divergence from client rules over time.** Mitigated only by the vector
   export being part of Budabit's test suite; propose adding it to Budabit
   CI so rule changes fail loudly when vectors are stale.

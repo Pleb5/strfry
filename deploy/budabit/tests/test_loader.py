@@ -165,6 +165,22 @@ class LoaderTests(unittest.TestCase):
         self.assertFalse(branch.derived().can_write(OUTSIDER, 11, "threads"))
         self.assertNotIn(MEMBER, branch.derived().person_bans)
 
+    def test_author_deletions_are_reloaded(self):
+        # The plugin restarted after the owner deleted a granting shard by id;
+        # the shard is gone from storage but the kind 5 remains.
+        granting = shard(OWNER, "thread-creator", [MEMBER])
+        events = [definition(), event(5, OWNER, [["e", granting["id"]]])]
+        state, loader, _, _ = make_loader(events)
+        loader.warm_up()
+        branch = state.branch(ADDRESS)
+        self.assertIn(granting["id"], branch.deleted_ids[OWNER])
+        cfg = config()
+        from policy.budabit import rules
+
+        self.assertEqual(rules.evaluate(granting, state, cfg).reason, "deleted_replay")
+        state.apply(granting, inline=True)
+        self.assertFalse(branch.derived().can_write(MEMBER, 11, "threads"))
+
     def test_stale_definition_in_storage_does_not_regress(self):
         old = definition(created_at=1_000)
         new = definition(sections=[("General", [["k", "1111"]], [])], created_at=2_000)
