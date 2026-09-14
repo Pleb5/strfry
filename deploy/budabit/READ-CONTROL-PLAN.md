@@ -1,10 +1,10 @@
 # Optional Budabit community read control
 
-Status: **proposal, not implemented or enabled**. Prepared 2026-09-14.
+Status: **implemented in source and verified in isolated tests; default off, not live-deployed**. Prepared 2026-09-14. Operator instructions: [PRIVATE-READS.md](PRIVATE-READS.md).
 
 This is the cross-repository implementation plan for the strfry relay and the
 Budabit client. It extends, rather than replaces, [WRITE-CONTROL-PLAN.md](WRITE-CONTROL-PLAN.md).
-The existing public relay deployment is not changed by this proposal.
+The existing public relay deployment is not changed by this implementation.
 
 Inspected source baselines:
 
@@ -15,9 +15,15 @@ Inspected source baselines:
 - Welshman is currently workspace source under Budabit's
   `packages/welshman/packages/`, not an installed package patch to edit.
 
-The findings below are from static source inspection, not a reproduction of
-every race or verification of the live deployment. Proposed configuration,
-metadata, helper names, and protocol extensions are not existing interfaces.
+The findings below record the original design inspection. Phases 0–8 implemented
+and tested the corrected contract: Python projection and reader vectors, core
+final-egress gate, AUTH lifecycle, private invitation shell, signed intent,
+publication/cache boundary and operator preflight. See the operator guide for
+current interfaces and verification scope. The initial client is a bounded
+200-event archive/plain-text view, not private parity for all public features.
+Native isolated relay and mocked-browser evidence do not establish live deployment
+or a built/published container. Immutable remote vector publication remains a
+separately authorized release step.
 
 ## 1. Recommended product contract
 

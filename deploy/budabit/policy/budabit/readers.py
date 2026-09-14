@@ -7,6 +7,7 @@ active epoch/exact pending sequence/lease at installation and final send.
 
 import json
 import os
+import stat
 from pathlib import Path
 import tempfile
 import threading
@@ -208,7 +209,10 @@ def check_read_snapshot(config, *, expected_epoch=None, expected_seq=None, now=N
         return True, ""
     now = time.time() if now is None else now
     try:
-        with open(config.read_snapshot_path, "rb") as handle:
+        fd = os.open(config.read_snapshot_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return False, "reader snapshot is not a regular file"
             raw = handle.read(config.read_max_snapshot_bytes + 1)
         if len(raw) > config.read_max_snapshot_bytes:
             return False, "reader snapshot oversized"
