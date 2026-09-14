@@ -21,7 +21,7 @@ from pathlib import Path
 from fixtures import config
 from policy.budabit import protocol as P
 from policy.budabit import rules
-from policy.budabit.state import CommunityState
+from policy.budabit.state import CommunityState, can_read_community
 
 VECTORS = Path(__file__).with_name("vectors") / "budabit-policy-vectors.json"
 
@@ -80,6 +80,22 @@ class VectorTests(unittest.TestCase):
             if valid != case["valid"]:
                 mismatches.append(f"{case['name']}: client valid={case['valid']} plugin valid={valid} {reason}")
         self.assertEqual(mismatches, [], "\n" + "\n".join(mismatches))
+
+    def test_readers_match_client(self):
+        readers = self.vectors["readers"]
+        self.assertEqual(readers["format"], 1)
+        total = 0
+        for scenario in readers["scenarios"]:
+            state = self.replay(scenario)
+            branch = state.branch(scenario["branch"])
+            for case in scenario["cases"]:
+                with self.subTest(scenario=scenario["name"], reader=case["name"]):
+                    total += 1
+                    self.assertEqual(
+                        can_read_community(branch, case["pubkey"], ready=scenario["ready"]),
+                        case["allowed"],
+                    )
+        self.assertGreater(total, 100)
 
 
 if __name__ == "__main__":
