@@ -14,6 +14,7 @@ from fixtures import (
     config,
     definition,
     event,
+    person_report,
     request,
     room_message,
     room_root,
@@ -202,6 +203,48 @@ class InitializationTests(unittest.TestCase):
             stage.loader.stop()
             stage.loader.thread.join(timeout=2)
         self.assertFalse(stage.loader.thread.is_alive())
+
+    def test_loaded_grants_do_not_open_readiness_before_stored_bans(self):
+        entered = threading.Event()
+        release = threading.Event()
+        report = person_report(OWNER, MEMBER)
+
+        class GatedReportScanner(FakeScanner):
+            def scan(self, filter_obj):
+                if filter_obj == {"kinds": [1984], "#h": [COMMUNITY]}:
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError("test report gate timed out")
+                return super().scan(filter_obj)
+
+        stage, _ = self.make_stage(
+            scanner=GatedReportScanner(standard_events() + [report]), start_loader=True,
+        )
+        member_thread = thread(MEMBER)
+        try:
+            self.assertTrue(entered.wait(2))
+            branch = stage.state.branch(ADDRESS)
+            self.assertTrue(all(coordinate.current for coordinate in branch.shards.values()))
+            self.assertIn(MEMBER, branch.derived().section_grants["Thread-creator"])
+            self.assertTrue(branch.derived().can_write(MEMBER, 11, "threads"))
+            self.assertEqual(branch.reports, {})
+            self.assertFalse(stage.loader.initialized)
+            self.assert_loading(stage, member_thread)
+            self.assert_loading(stage, event(1, OUTSIDER, []))
+        finally:
+            release.set()
+            stage.loader.stop()
+            stage.loader.thread.join(timeout=2)
+
+        self.assertFalse(stage.loader.thread.is_alive())
+        self.assertTrue(stage.loader.initialized)
+        self.assertIn(report["id"], branch.reports)
+        self.assertIn(MEMBER, branch.derived().person_bans)
+        self.assertEqual(self.decide(stage, member_thread), {
+            "id": member_thread["id"],
+            "action": "reject",
+            "msg": "blocked: author is moderated in this community",
+        })
 
     def test_failed_initial_load_retries_with_capped_backoff(self):
         class FailingScanner:

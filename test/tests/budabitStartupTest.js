@@ -24,6 +24,8 @@ const scanner = path.join(workDir, "gated-scanner.py");
 const entered = path.join(workDir, "scan-entered");
 const release = path.join(workDir, "scan-release");
 const failScan = path.join(workDir, "scan-fail");
+const reportsEntered = path.join(workDir, "reports-entered");
+const reportsRelease = path.join(workDir, "reports-release");
 const community = "c".repeat(64);
 const autoHost = "wss://relay.test";
 const loading = "error: relay policy is loading, retry shortly";
@@ -35,6 +37,7 @@ function identity(name) {
 
 const owner = identity("owner");
 const member = identity("member");
+const bannedMember = identity("banned-member");
 const outsider = identity("outsider");
 let timestamp = Math.floor(Date.now() / 1000) - 100;
 let subscription = 0;
@@ -45,7 +48,7 @@ function sign(who, kind, tags, content = "isolated startup regression") {
 
 const definitionTags = [
   ["d", community], ["name", "Startup fixture"], ["r", autoHost],
-  ["content", "General"], ["k", "9", "room-message"], ["k", "1111"],
+  ["content", "General"], ["k", "9", "room-message"], ["k", "1111"], ["k", "1984"],
   ["a", `30000:${owner.pub}:${community}-general`],
   ["content", "Room-creator"], ["k", "11", "room"],
   ["a", `30000:${owner.pub}:${community}-room-creator`],
@@ -56,8 +59,14 @@ const definition = sign(owner, 32222, definitionTags, "");
 const room = sign(owner, 11, [["h", community], ["room"], ["title", "Fixture room"]]);
 const rootThread = sign(owner, 11, [["h", community], ["title", "Fixture thread"]]);
 const seed = [definition, room, rootThread, ...["general", "room-creator", "thread-creator"].map(
-  (section) => sign(owner, 30000, [["d", `${community}-${section}`], ["p", member.pub]], ""),
+  (section) => sign(owner, 30000, [
+    ["d", `${community}-${section}`], ["p", member.pub], ["p", bannedMember.pub],
+  ], ""),
 )];
+seed.push(sign(owner, 1984, [
+  ["p", bannedMember.pub, "spam"], ["h", community],
+  ["a", `32222:${owner.pub}:${community}`, "", "community"],
+], "stored ban against an otherwise authorized member"));
 const thread = (who) => sign(who, 11, [["h", community], ["title", "Thread test"]]);
 const roomMessage = () => sign(outsider, 9, [
   ["h", community], ["E", room.id, "", owner.pub], ["K", "11"],
@@ -160,6 +169,10 @@ if "scan" in sys.argv and json.loads(sys.argv[-1]) == {"kinds": [32222]}:
     if pathlib.Path(${JSON.stringify(failScan)}).exists():
         print("injected initial scan failure", file=sys.stderr)
         sys.exit(1)
+elif "scan" in sys.argv and json.loads(sys.argv[-1]) == {"kinds": [1984], "#h": [${JSON.stringify(community)}]}:
+    pathlib.Path(${JSON.stringify(reportsEntered)}).touch()
+    while not pathlib.Path(${JSON.stringify(reportsRelease)}).exists():
+        time.sleep(0.01)
 os.execv(${JSON.stringify(binary)}, [${JSON.stringify(binary)}, *sys.argv[1:]])
 `, { mode: 0o700 });
     writeFileSync(cfgPath, `db = ${JSON.stringify(dbDir)}
@@ -208,24 +221,39 @@ relay {
     await waitUntil(() => existsSync(entered), "ingestion scanner entered the gate");
     const publicNote = sign(outsider, 1, [], "public passthrough after initialization");
     const memberThread = thread(member);
+    const bannedThread = thread(bannedMember);
     const newDefinition = sign(outsider, 32222, [
       ["d", "b".repeat(64)], ["name", "New community"], ["r", autoHost],
       ["content", "General"], ["k", "1111"],
     ], "");
-    for (const event of [publicNote, memberThread, newDefinition]) {
+    for (const event of [publicNote, memberThread, bannedThread, newDefinition]) {
       await expectRejected(client, event, loading, `cold kind ${event.kind}`);
     }
-    await expectStored(client, [...negative.map(([event]) => event), publicNote, memberThread, newDefinition], 0);
+    await expectStored(client, [...negative.map(([event]) => event), publicNote, memberThread, bannedThread, newDefinition], 0);
     await expectStored(client, seed, seed.length); // Reads still work while loading.
 
     writeFileSync(release, "continue\n");
+    console.log("* loaded grants must not bypass pending stored bans");
+    // load_branch scans reports only after applying the referenced shards.
+    // Keep both a banned and an unbanned grantee in the fixture so missing
+    // grants cannot accidentally satisfy the post-initialization denial.
+    await waitUntil(() => existsSync(reportsEntered), "report scan entered after grant loading");
+    expect(!logs.includes('"event":"initial_load_complete"'), "pending reports must keep initialization incomplete");
+    await expectRejected(client, bannedThread, loading, "granted member waits for stored ban");
+    await expectRejected(client, memberThread, loading, "unbanned member also waits for report scan");
+    await expectRejected(client, publicNote, loading, "public writes wait for the complete initial pass");
+    await expectStored(client, [bannedThread, memberThread, publicNote], 0);
+    await expectStored(client, seed, seed.length);
+    writeFileSync(reportsRelease, "load stored reports\n");
     await waitUntil(() => logs.includes('"event":"initial_load_complete"'), "ingestion initial load completed");
     console.log("* initialized ingestion uses grants and normal passthrough");
+    await expectRejected(client, bannedThread,
+      "blocked: author is moderated in this community", "stored ban overrides member grant after loading");
     for (const [event, section, label] of negative) {
       await expectRejected(client, event,
         `blocked: not a current writer for section "${section}" in ${community.slice(0, 8)}`, `warm ${label}`);
     }
-    await expectStored(client, negative.map(([event]) => event), 0);
+    await expectStored(client, [...negative.map(([event]) => event), bannedThread], 0);
     for (const event of [publicNote, memberThread, newDefinition]) {
       const result = await publish(client, event);
       expect(result.accepted === true, `initialized kind ${event.kind}: ${result.msg}`);
@@ -256,7 +284,9 @@ relay {
     await expectRejected(client, negative[2][0],
       `blocked: not a current writer for section "Thread-creator" in ${community.slice(0, 8)}`, "recovered outsider still denied");
     expect((await publish(client, reloadNote)).accepted === true, "recovered public passthrough");
-    await expectStored(client, negative.map(([event]) => event), 0);
+    await expectRejected(client, bannedThread,
+      "blocked: author is moderated in this community", "recovered plugin still applies stored ban");
+    await expectStored(client, [...negative.map(([event]) => event), bannedThread], 0);
     passed = true;
     console.log("budabitStartupTest: all checks passed");
   } catch (error) {
@@ -264,6 +294,7 @@ relay {
   } finally {
     // Release only this test's scanner before terminating its relay process.
     writeFileSync(release, "test finished\n");
+    writeFileSync(reportsRelease, "test finished\n");
     if (client) await client.close();
     await stopRelay(proc);
     if (passed) rmSync(workDir, { recursive: true, force: true });
