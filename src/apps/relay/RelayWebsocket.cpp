@@ -5,6 +5,7 @@
 #include "Favicon.h"
 #include "Bech32Utils.h"
 #include "PrometheusMetrics.h"
+#include "ReadRestrictor.h"
 
 
 
@@ -133,6 +134,14 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
                 nip11["budabit"] = tao::json::value({{"read_control", tao::json::value({
                     {"version", 1}, {"mode", "members"}, {"scope", "relay"},
                 })}});
+                // Explicit completeness contract for authenticated readers:
+                // these supported kinds have no post-limit involved-key filter.
+                // Other retained kinds (notably DMs) keep their restrictions.
+                nip11["budabit"]["read_control"]["unfiltered_kinds"] = tao::json::empty_array;
+                for (uint64_t kind : {1, 5, 1984, 30000, 32222}) {
+                    if (!cfg().relay__auth__restrictReadToInvolvedPubkey || !ReadRestrictor::restrictedKinds().contains(kind))
+                        nip11["budabit"]["read_control"]["unfiltered_kinds"].push_back(kind);
+                }
                 if (cfg().relay__readControl__advertiseBranch)
                     nip11["budabit"]["read_control"]["branch_address"] = readGate.branch;
             }
