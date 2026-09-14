@@ -28,6 +28,12 @@ int main() {
     ReadGate gate;
     gate.configure();
     auto epoch = gate.startEpoch();
+    auto status = [&] {
+        gate.writeStatus();
+        std::ifstream file(gate.path + ".core-status.json");
+        return tao::json::from_string(std::string(std::istreambuf_iterator<char>(file), {}));
+    };
+    assert(!status().at("ready").get_boolean());
     uint64_t heartbeat = 0;
     auto snapshot = [&](uint64_t seq, std::vector<std::string> readers, std::string epochOverride = "") {
         tao::json::value doc = {
@@ -46,6 +52,8 @@ int main() {
     assert(gate.access(1) == ReadGate::Access::Unavailable);
     snapshot(0, {owner, member});
     assert(gate.access(1) == ReadGate::Access::Allowed);
+    assert(status().at("ready").get_boolean());
+    assert(status().at("epoch").get_string() == epoch);
     gate.authenticate(1, key(outsider));
     assert(gate.access(1) == ReadGate::Access::Allowed); // second key doesn't replace first
 
@@ -62,6 +70,8 @@ int main() {
     assert(gate.accessLocked(1) == ReadGate::Access::Allowed);
     sendLock.unlock();
     assert(writer.get() == 1);
+    assert(!status().at("ready").get_boolean());
+    assert(status().at("pending_seq").get_unsigned() == 1);
     // Simulated LMDB commit happens only AFTER the real gate invalidated.
     assert(gate.access(1) == ReadGate::Access::Unavailable);
     snapshot(0, {owner, member}); // mixed scan captured the old committed seq
@@ -83,6 +93,7 @@ int main() {
 
     // Expired liveness is checked at final send without waiting for the timer.
     gate.lastHeartbeat -= std::chrono::seconds(10);
+    assert(!status().at("ready").get_boolean());
     assert(!gate.available());
     assert(gate.access(2) == ReadGate::Access::Unavailable);
     gate.refresh(); // unchanged file MUST NOT renew lease
@@ -90,6 +101,7 @@ int main() {
     snapshot(2, {owner, member});
     assert(gate.available());
     gate.lostPlugin();
+    assert(!status().at("supervisor_running").get_boolean());
     auto previousEpoch = epoch;
     epoch = gate.startEpoch();
     snapshot(2, {owner, member}, previousEpoch);
@@ -113,6 +125,7 @@ int main() {
     cfg.relay__negentropy__enabled = true; // runtime drift cannot bypass gate
     assert(!gate.available());
     std::filesystem::remove(gate.path);
+    std::filesystem::remove(gate.path + ".core-status.json");
     std::filesystem::remove(directory);
     std::cout << "PASS ReadGate production synchronization, stale/mixed scans, queued output, epochs, lease and bounds\n";
 }

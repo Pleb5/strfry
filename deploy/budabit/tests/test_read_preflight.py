@@ -40,6 +40,50 @@ class ReadPreflightTests(unittest.TestCase):
                      "owner": OWNER, "write_enforcement": True, "ready": True,
                      "heartbeat": 1, "updated_at": time.time(), "eligible_pubkeys": [OWNER]}
         self.path.write_text(json.dumps(self.data))
+        self.core_path = Path(str(self.path) + ".core-status.json")
+        self.core = {"version": 1, "pid": os.getpid(),
+                     "process_start": Path('/proc/self/stat').read_text().rsplit(")", 1)[1].split()[19],
+                     "boot_id": Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                     "epoch": self.data["epoch"], "pending_seq": 0, "installed_seq": 0,
+                     "branch_address": ADDRESS, "heartbeat": 1, "ready": True, "installed": True,
+                     "supervisor_running": True, "measured_monotonic_ns": time.monotonic_ns(),
+                     "lease_deadline_monotonic_ns": time.monotonic_ns() + 3_000_000_000}
+        self.core_path.write_text(json.dumps(self.core))
+        self.core_path.chmod(0o600)
+
+    def test_runtime_requires_installed_projection_exact_epoch_sequence_and_lease(self):
+        for key, value in {"epoch": "2" * 64, "pending_seq": 1, "installed_seq": 1,
+                           "heartbeat": 2, "ready": False, "installed": False,
+                           "supervisor_running": False, "measured_monotonic_ns": 1,
+                           "lease_deadline_monotonic_ns": 1, "process_start": "old",
+                           "boot_id": "old", "pid": 999999999, "version": True}.items():
+            self.core_path.write_text(json.dumps({**self.core, key: value}))
+            with self.subTest(key=key), self.assertRaises((ValueError, OSError)):
+                preflight.validate(self.values, self.env)
+        self.core_path.write_text(json.dumps(self.core))
+        self.assertTrue(preflight.validate(self.values, self.env))
+
+    def test_core_status_protected_bounded_and_not_required_prestart(self):
+        self.core_path.unlink()
+        self.assertTrue(preflight.validate(self.values, self.env, snapshot=False))
+        with self.assertRaises(OSError):
+            preflight.validate(self.values, self.env)
+        os.mkfifo(self.core_path, 0o600)
+        with self.assertRaises(ValueError):
+            preflight.validate(self.values, self.env)
+        self.core_path.unlink()
+        self.core_path.symlink_to(self.path)
+        with self.assertRaises(OSError):
+            preflight.validate(self.values, self.env)
+        self.core_path.unlink()
+        self.core_path.write_text(json.dumps(self.core))
+        self.core_path.chmod(0o644)
+        with self.assertRaises(ValueError):
+            preflight.validate(self.values, self.env)
+        self.core_path.chmod(0o600)
+        self.core_path.write_text("x" * 16385)
+        with self.assertRaises(ValueError):
+            preflight.validate(self.values, self.env)
 
     def test_matching_private_and_public_presets(self):
         self.assertTrue(preflight.validate(self.values, self.env))

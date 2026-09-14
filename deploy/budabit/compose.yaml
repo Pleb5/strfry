@@ -80,7 +80,7 @@ services:
           wget -q -O /dev/null http://127.0.0.1:7777/
           && /usr/local/lib/strfry/write-policy.py --check-storage
           && /usr/local/lib/strfry/write-policy.py --check-policy
-          && python3 /usr/local/lib/strfry/check-read-control.py --config-only --url http://127.0.0.1:7777/
+          && python3 /usr/local/lib/strfry/check-read-control.py --url http://127.0.0.1:7777/
           && { [ "$${BUDABIT_READ_CONTROL}" != members ] || /usr/local/lib/strfry/write-policy.py --check-read-policy; }
       interval: 30s
       timeout: 20s

@@ -19,6 +19,7 @@ void RelayServer::runCron() {
             readGate.refresh();
             tpWriter.dispatch(0, MsgWriter{MsgWriter::Tick{}});
             for (auto id : readGate.terminations()) terminateConn(id);
+            readGate.writeStatus();
             // Also resumes deferred live catch-up after a gate installation.
             if (readGate.available()) tpReqMonitor.dispatchToAll([] { return MsgReqMonitor{MsgReqMonitor::DBChange{}}; });
         });

@@ -108,13 +108,20 @@ docker compose -f deploy/budabit/compose.yaml exec relay \
 ```
 
 The Compose health check performs storage/write-policy checks, config/NIP-11
-agreement, and `--check-read-policy` only in members mode. The NIP-11 claim must be
+agreement, installed-core projection status and `--check-read-policy` only in members mode. The NIP-11 claim must be
 `limitation.auth_required: true` plus
 `budabit.read_control: {version: 1, mode: "members", scope: "relay"}`. Check it
 through the intended reverse-proxy path too; no redirect or public fallback.
 
-Health validates local artifacts, **not** the C++ active epoch/pending sequence or
-an end-to-end privacy guarantee. Raw protocol probes remain required before opening
+Runtime health compares the Python artifact with the running core's installed
+epoch, exact pending/installed sequence and heartbeat. The core writes a protected
+local status at invalidation and every100ms; the checker verifies readiness,
+supervisor epoch, unexpired monotonic lease, status age under one second and Linux
+boot/PID/start-time identity. Run it as the relay user in the same PID/time namespace.
+Missing/rejected/pending/expired/replaced-core status fails. Pre-start `--config-only`
+does not require a status file. `--check-read-policy` alone remains artifact-only.
+This is sampled readiness, **not** an end-to-end privacy guarantee or a guarantee
+against a failure immediately after checking. Raw protocol probes remain required before opening
 ingress: anonymous REQ gets CLOSED with no EVENT/EOSE; outsider AUTH succeeds but
 REQ is restricted; member AUTH+REQ returns history; COUNT/NEG never return data.
 Use controlled keys and local fixtures, not live accounts for routine tests.
@@ -124,6 +131,11 @@ Use controlled keys and local fixtures, not live accounts for routine tests.
 - Snapshot: `budabit-readers.json`, atomic 0600, includes the private roster.
 - Status: `budabit-readers.status.json`, atomic 0600, counts/readiness/error but no
   roster. It still includes private coordinates; do not expose it as a public URL.
+- Serving-core status: `<snapshotPath>.core-status.json`, atomic0600, epoch,
+  installed/pending revision, heartbeat, readiness and process/lease identity.
+  No roster or connection identities; still private, never a public status API.
+  Do not restore this file as evidence of a running process. Failed writes remove
+  it so health cannot reuse an old success. Nothing reads it to authorize clients.
 - A worker heartbeat advances once per second; a blocked rebuild cannot renew it.
   The core validates epoch, exact pending sequence and a monotonic lease at final
   sends. A gate timeout (default three seconds) closes rather than permits output.

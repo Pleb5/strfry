@@ -3,7 +3,8 @@
 
 Accept a conservative assignment/block subset of strfry's config syntax. Refuse
 includes, duplicate keys and expressions rather than disagree with the core.
-This validates local artifacts, NOT the core's active epoch/sequence or egress.
+Runtime checks compare protected serving-core status with the Python projection.
+This is sampled local health, not a replacement for end-to-end access probes.
 """
 import argparse
 import json
@@ -11,6 +12,8 @@ import os
 from pathlib import Path
 import re
 import sys
+import stat
+import time
 import urllib.request
 
 from policy.budabit.config import BudabitConfig
@@ -103,9 +106,45 @@ def validate(values, env, *, snapshot=True):
     for key in ("dumpInAll", "dumpInEvents", "dumpInReqs"):
         require(values.get("relay.logging." + key, False) is False, "disable raw event/request logging on private endpoints")
     if snapshot:
-        ok, reason = check_read_snapshot(policy)
+        core = read_core_status(policy)
+        ok, reason = check_read_snapshot(policy, expected_epoch=core["epoch"],
+                                        expected_seq=core["pending_seq"], expected_heartbeat=core["heartbeat"])
         require(ok, reason)
+        latest = read_core_status(policy)
+        require(all(core[key] == latest[key] for key in ("pid", "process_start", "boot_id", "epoch", "pending_seq", "heartbeat")), "core projection changed during health check")
     return True
+
+
+def read_core_status(policy):
+    path = str(policy.read_snapshot_path) + ".core-status.json"
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise ValueError("core status must be a protected local regular file")
+        raw = handle.read(16385)
+    if len(raw) > 16384:
+        raise ValueError("core status oversized")
+    core = json.loads(raw)
+    if (type(core["version"]) is not int or core["version"] != 1
+            or core["ready"] is not True or core["installed"] is not True
+            or core["supervisor_running"] is not True or core["branch_address"] != policy.branches[0]
+            or not re.fullmatch(r"[0-9a-f]{64}", core["epoch"])):
+        raise ValueError("core serving policy is not ready")
+    for key in ("pid", "pending_seq", "installed_seq", "heartbeat", "measured_monotonic_ns", "lease_deadline_monotonic_ns"):
+        if type(core[key]) is not int or core[key] < 0:
+            raise ValueError("invalid core status integer")
+    now = time.monotonic_ns()
+    if (core["installed_seq"] != core["pending_seq"]
+            or not 0 <= now - core["measured_monotonic_ns"] < 1_000_000_000
+            or now >= core["lease_deadline_monotonic_ns"]):
+        raise ValueError("core projection is pending or its status/lease expired")
+    if core["boot_id"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip():
+        raise ValueError("core status belongs to an old boot")
+    process = Path(f'/proc/{core["pid"]}/stat').read_text().rsplit(")", 1)[1].split()
+    if process[0] in ("Z", "T", "t", "X") or process[19] != core["process_start"]:
+        raise ValueError("core process is stopped or replaced")
+    return core
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
