@@ -110,13 +110,22 @@ Tests (from the repository root):
 python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
 node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
 node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure recovery
+node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regression
 ```
 
 ## Retention
 
 Normal events older than 365 days are deleted monthly. Current replaceable
 events, including kinds 0, 3, and 41 and the replaceable ranges, are preserved.
+Kinds 1984 (reports) and 5 (including report retractions) are also preserved,
+because old moderation evidence may still determine current authority. Dry runs
+and applied runs report how many replaceable/policy events were excluded.
 Ephemeral and NIP-40 expiration events are handled by strfry itself.
+
+When NIP-42 is enabled, `relay.auth.maxAgeSeconds` defaults to 600 to allow human
+signer approval. Ordinary ephemeral events still use their separate 60-second
+cutoff; the configured future-skew bound applies to AUTH too. This does not
+enable AUTH or private reads in the current deployment template.
 
 LMDB does not return freed pages to the filesystem automatically. If pruning
 deletes substantial data, stop the relay and run a planned compaction before

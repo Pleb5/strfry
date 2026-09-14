@@ -18,7 +18,7 @@ Bytes32 nostrHash(const tao::json::value &origJson);
 bool verifySig(secp256k1_context* ctx, std::string_view sig, std::string_view hash, std::string_view pubkey);
 void verifyNostrEvent(secp256k1_context *secpCtx, PackedEventView packed, const tao::json::value &origJson);
 void verifyNostrEventJsonSize(std::string_view jsonStr);
-void verifyEventTimestamp(PackedEventView packed);
+void verifyEventTimestamp(PackedEventView packed, std::optional<uint64_t> maxAgeSeconds = std::nullopt);
 
 void parseAndVerifyEvent(const tao::json::value &origJson, secp256k1_context *secpCtx, bool verifyMsg, bool verifyTime, std::string &packedStr, std::string &jsonStr);
 

@@ -557,6 +557,12 @@ replaceable events:
 - Kinds 0, 3, and 41
 - Kinds 10000 through 19999
 - Kinds 30000 through 39999
+- Kinds 1984 and 5 (reports and deletion/retraction evidence), irrespective of age
+
+The latter exclusions protect long-lived moderation state; do not remove them to
+reclaim space without a separate authority-retention design. Counts of preserved
+replaceable/policy events appear in dry-run and apply output. This source change
+does not establish which historical events a live deployment has already pruned.
 
 The retention script finishes its LMDB read scan and spools selected IDs to a
 temporary file before deleting batches. Deleting while retaining a long-lived
