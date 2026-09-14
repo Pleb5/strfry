@@ -191,6 +191,7 @@ try {
   writeFileSync(scanPause, "hold controlled scanner");
   await accepted(admin, grant([member, outsider]));
   await until(() => current().ready === false && current().seq === 3, "closed sequence gate");
+  assert.notEqual(preflight().status, 0, "pending newer commit must be unhealthy");
   // A newer authority commit arrives while the prior rebuild is blocked. Its
   // final snapshot must not inherit the earlier scan's label/grant.
   await accepted(admin, grant([member]));
@@ -230,12 +231,14 @@ try {
     if (contents === null) unlinkSync(readersPath);
     else writeFileSync(readersPath, contents);
     await delay(150);
+    assert.notEqual(preflight().status, 0, "rejected snapshot must fail serving health");
     await denied(stranger, {ids: [secretNote.id]}, "error: community read policy temporarily unavailable");
   }
   process.kill(policyPid, "SIGCONT");
   await until(() => current().ready && current().heartbeat > healthy.heartbeat, "snapshot repair");
   await delay(150);
   assert((await read(restored)).some(ev => ev.id === secretNote.id));
+  assert.equal(preflight().status, 0, "repaired installed projection restores health");
   // Expiring the sole grant is an internal policy mutation, not an EVENT write.
   const expiredConnection = once(restored.ws, "close");
   await accepted(admin, event(owner, 30000, [["d", `${community}-general`], ["p", member.pubkey],
@@ -258,6 +261,14 @@ try {
   await auth(recovered, member);
   await delay(150);
   assert((await read(recovered)).some(ev => ev.id === secretNote.id));
+  assert.equal(preflight().status, 0, "fresh supervisor epoch restores serving health");
+  // A frozen core cannot remain healthy just because Python has a fresh artifact.
+  relay.kill("SIGSTOP");
+  try {
+    await delay(1100);
+    assert.notEqual(preflight().status, 0, "stopped serving core must be unhealthy");
+  } finally { relay.kill("SIGCONT"); }
+  await delay(150);
   console.log("PASS private relay: anonymous/outsider/member, owner bootstrap, ACK writes, full history, multi-key AUTH, live ban/regrant, COUNT/NEG, NIP-11, idle failure/restart");
   await stop();
   // Import only while stopped. Deliberately backpressure a large historical

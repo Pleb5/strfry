@@ -202,8 +202,8 @@ class ReadProjection:
             self.thread.join(timeout=2)
 
 
-def check_read_snapshot(config, *, expected_epoch=None, expected_seq=None, now=None):
-    """Local artifact health only. Serving-state validation belongs to C++."""
+def check_read_snapshot(config, *, expected_epoch=None, expected_seq=None, expected_heartbeat=None, now=None):
+    """Artifact health; runtime preflight binds this to C++ installed status."""
     config.validate_read_control()
     if config.read_control == "off":
         return True, ""
@@ -217,6 +217,8 @@ def check_read_snapshot(config, *, expected_epoch=None, expected_seq=None, now=N
         if len(raw) > config.read_max_snapshot_bytes:
             return False, "reader snapshot oversized"
         data = json.loads(raw)
+        if expected_heartbeat is not None and data.get("heartbeat") != expected_heartbeat:
+            return False, "reader heartbeat differs from installed core projection"
         if (type(data["version"]) is not int or data["version"] != 1 or data["ready"] is not True
                 or data["write_enforcement"] is not True
                 or data["branch_address"] != config.branches[0]

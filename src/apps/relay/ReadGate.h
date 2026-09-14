@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <mutex>
+#include <fstream>
+#include <sstream>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -38,6 +40,56 @@ struct ReadGate {
     Clock::time_point lastHeartbeat = Clock::now(), unavailableSince = Clock::now();
     flat_hash_map<uint64_t, Connection> connections;
     std::string lastFileIdentity;
+
+    // Local-only sampled serving status, not an authorization input. Publish at
+    // invalidation and every cron tick; never expose roster/connection identities.
+    static std::string processStart() {
+        std::ifstream file("/proc/self/stat");
+        std::string line, field;
+        std::getline(file, line);
+        auto end = line.rfind(')');
+        if (end == std::string::npos) return "";
+        std::istringstream fields(line.substr(end + 2));
+        for (int i = 0; i <= 19; ++i) if (!(fields >> field)) return "";
+        return field; // /proc stat field22, guards PID reuse
+    }
+    void writeStatus() {
+        if (!enabled || path.empty()) return;
+        std::lock_guard lock(mutex);
+        auto statusPath = path + ".core-status.json";
+        std::string temp = statusPath + ".XXXXXX";
+        int fd = -1;
+        try {
+            static const auto start = processStart();
+            static const auto boot = [] { std::ifstream f("/proc/sys/kernel/random/boot_id"); std::string id; f >> id; return id; }();
+            auto nanos = [](Clock::time_point at) { return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count()); };
+            tao::json::value data = {
+                {"version", uint64_t(1)}, {"pid", uint64_t(getpid())}, {"process_start", start}, {"boot_id", boot},
+                {"epoch", epoch}, {"branch_address", branch}, {"pending_seq", pendingSeq},
+                {"installed_seq", snapshot ? snapshot->seq : pendingSeq}, {"installed", bool(snapshot)},
+                {"heartbeat", heartbeat}, {"ready", availableLocked()}, {"supervisor_running", !epoch.empty()},
+                {"measured_monotonic_ns", nanos(Clock::now())},
+                {"lease_deadline_monotonic_ns", nanos(lastHeartbeat + std::chrono::seconds(timeoutSeconds))},
+            };
+            auto content = tao::json::to_string(data) + "\n";
+            fd = ::mkstemp(temp.data()); // private0600, same-dir atomic replacement
+            if (fd < 0) throw herr("core status create failed");
+            size_t offset = 0;
+            while (offset < content.size()) {
+                auto n = ::write(fd, content.data() + offset, content.size() - offset);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) throw herr("core status write failed");
+                offset += n;
+            }
+            if (::close(fd)) { fd = -1; throw herr("core status close failed"); }
+            fd = -1;
+            if (::rename(temp.c_str(), statusPath.c_str())) throw herr("core status replace failed");
+        } catch (...) {
+            if (fd >= 0) ::close(fd);
+            ::unlink(temp.c_str());
+            ::unlink(statusPath.c_str()); // health must fail, not reuse old success
+        }
+    }
 
     static bool hexKey(std::string_view key) {
         return key.size() == 64 && std::all_of(key.begin(), key.end(), [](char c) {
@@ -81,6 +133,7 @@ struct ReadGate {
         unavailableLocked();
         epoch.clear();
         for (auto &[_, conn] : connections) if (!conn.keys.empty()) conn.revoked = true;
+        writeStatus();
     }
     std::string startEpoch() {
         std::lock_guard lock(mutex);
@@ -92,12 +145,14 @@ struct ReadGate {
         heartbeat = 0;
         lastProjectionReady = false;
         lastFileIdentity.clear();
+        writeStatus();
         return epoch;
     }
     uint64_t beforeCommit() {
         std::lock_guard lock(mutex); // shared with final send, BEFORE LMDB commit
         unavailableLocked();
         if (++pendingSeq == 0) throw herr("reader sequence exhausted");
+        writeStatus();
         return pendingSeq;
     }
     bool availableLocked() const {
