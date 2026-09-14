@@ -111,7 +111,35 @@ python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 
 node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
 node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure recovery
 node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regression
+node test/tests/budabitReadProjectionTest.js # projection only; not C++ read enforcement
 ```
+
+## Private reader projection (preparatory, not a serving gate)
+
+`BUDABIT_READ_CONTROL=members` enables a separate committed reader projection,
+requiring one explicit branch, no auto-hosting, the live loader, and non-dry-run
+write enforcement. `off` is the default. **The Python flag alone does not restrict
+relay reads.** Enable it only with the matching C++ gate once that gate is available.
+
+The parent initializes the JSONL plugin with a fresh `read-control-init` record
+containing `epoch`, `seq`, and `branch_address`, then sends response-less
+`committed` records after storage transactions. Accepted authority writes carry
+optional `policyRelevant:true`. No reader snapshot appears on stdout.
+
+Snapshots are atomically replaced at `BUDABIT_READ_SNAPSHOT_PATH` (default next to
+`STRFRY_POLICY_DB_FILE`, named `budabit-readers.json`); sibling `.status.json`
+contains health/counts, not the roster. Both are operator-private mode-0600 files.
+The reader set is rebuilt from a fresh Branch, never speculative accepted writes.
+Defaults: `BUDABIT_READ_MAX_PUBKEYS=20000`, `BUDABIT_READ_MAX_SNAPSHOT_BYTES=2097152`,
+`BUDABIT_READ_SCAN_MAX_BYTES=33554432`, `BUDABIT_READ_SCAN_TIMEOUT_SECONDS=30`.
+Byte/time budgets cover an entire rebuild; malformed/incomplete/oversize scans
+produce unavailable snapshots, not partial lists. The worker refreshes snapshots
+once per second while idle and cannot heartbeat through a blocked scan.
+
+`write-policy.py --check-read-policy [EPOCH SEQ]` validates a recent local snapshot.
+Without a serving epoch/sequence, this is **not proof of live C++ enforcement**.
+The serving gate must independently enforce active epoch, pending sequence,
+pre-commit invalidation, monotonic liveness, and final-send authorization.
 
 ## Retention
 

@@ -142,6 +142,8 @@ class Pipeline:
         if self.on_decision is not None:
             self.on_decision(request, decision, stage_name)
         response = {"id": request.event_id, "action": decision.action}
+        if decision.accepted and request.annotations.get("policyRelevant") is True:
+            response["policyRelevant"] = True
         if decision.action == REJECT and decision.msg:
             response["msg"] = decision.msg
         return response

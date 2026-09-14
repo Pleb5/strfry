@@ -1,6 +1,8 @@
 """Environment configuration for the Budabit write-control stage."""
 
 from dataclasses import dataclass, field
+import math
+from pathlib import Path
 
 from . import protocol
 
@@ -22,10 +24,41 @@ class BudabitConfig:
     policy_version: str = "1"
     loader_enabled: bool = True
     auto_host_url: str = ""
+    read_control: str = "off"
+    read_snapshot_path: str = "/var/lib/strfry/db/budabit-readers.json"
+    read_max_pubkeys: int = 20000
+    read_max_snapshot_bytes: int = 2 * 1024**2
+    read_scan_max_bytes: int = 32 * 1024**2
+    read_scan_timeout_seconds: float = 30.0
 
     @property
     def enabled(self):
         return bool(self.branches) or bool(self.auto_host_url)
+
+    def validate_read_control(self):
+        if self.read_control not in ("off", "members"):
+            raise ValueError("BUDABIT_READ_CONTROL must be off or members")
+        if self.read_control == "off":
+            return
+        if not self.enabled or self.dry_run or not self.loader_enabled:
+            raise ValueError("member reads require enforcing write control and its live loader")
+        if len(self.branches) != 1 or self.auto_host_url:
+            raise ValueError("member reads require one explicit branch and no auto-hosting")
+        path = Path(self.read_snapshot_path)
+        if not path.is_absolute() or path.suffix != ".json":
+            raise ValueError("BUDABIT_READ_SNAPSHOT_PATH must be an absolute .json path")
+        for name, value, maximum in (
+            ("read_max_pubkeys", self.read_max_pubkeys, 200000),
+            ("read_max_snapshot_bytes", self.read_max_snapshot_bytes, 32 * 1024**2),
+            ("read_scan_max_bytes", self.read_scan_max_bytes, 256 * 1024**2),
+        ):
+            if type(value) is not int or not 1 <= value <= maximum:
+                raise ValueError(f"{name} must be between 1 and {maximum}")
+        if self.read_max_snapshot_bytes < 1024:
+            raise ValueError("read_max_snapshot_bytes must allow at least 1024 bytes")
+        for value in (self.reconcile_seconds, self.read_scan_timeout_seconds):
+            if not math.isfinite(value) or not 0 < value <= 3600:
+                raise ValueError("private reconcile/scan timeouts must be finite, positive, at most 3600 seconds")
 
     @classmethod
     def from_env(cls, env):
@@ -50,7 +83,7 @@ class BudabitConfig:
         mode = env.get("BUDABIT_MODE", "passthrough").strip().lower()
         if mode not in ("passthrough", "strict"):
             raise ValueError(f"BUDABIT_MODE must be passthrough or strict, got {mode!r}")
-        return cls(
+        config = cls(
             branches=branches,
             strict=mode == "strict",
             dry_run=_flag(env, "BUDABIT_DRY_RUN"),
@@ -62,4 +95,15 @@ class BudabitConfig:
             policy_version=env.get("BUDABIT_POLICY_VERSION", "1"),
             loader_enabled=not _flag(env, "BUDABIT_DISABLE_LOADER"),
             auto_host_url=auto_host_url,
+            read_control=env.get("BUDABIT_READ_CONTROL", "off").strip().lower(),
+            read_snapshot_path=env.get(
+                "BUDABIT_READ_SNAPSHOT_PATH",
+                str(Path(env.get("STRFRY_POLICY_DB_FILE", "/var/lib/strfry/db/data.mdb")).parent / "budabit-readers.json"),
+            ),
+            read_max_pubkeys=int(env.get("BUDABIT_READ_MAX_PUBKEYS", "20000")),
+            read_max_snapshot_bytes=int(env.get("BUDABIT_READ_MAX_SNAPSHOT_BYTES", str(2 * 1024**2))),
+            read_scan_max_bytes=int(env.get("BUDABIT_READ_SCAN_MAX_BYTES", str(32 * 1024**2))),
+            read_scan_timeout_seconds=float(env.get("BUDABIT_READ_SCAN_TIMEOUT_SECONDS", "30")),
         )
+        config.validate_read_control()
+        return config
