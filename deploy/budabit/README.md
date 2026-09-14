@@ -114,12 +114,31 @@ node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regr
 node test/tests/budabitReadProjectionTest.js # projection only; not C++ read enforcement
 ```
 
-## Private reader projection (preparatory, not a serving gate)
+## Private reader projection and relay gate
 
 `BUDABIT_READ_CONTROL=members` enables a separate committed reader projection,
 requiring one explicit branch, no auto-hosting, the live loader, and non-dry-run
 write enforcement. `off` is the default. **The Python flag alone does not restrict
-relay reads.** Enable it only with the matching C++ gate once that gate is available.
+relay reads.** The independent `relay.readControl.enabled` C++ switch must also be
+enabled, with a matching pinned `branchAddress` and absolute `snapshotPath`, AUTH
+enabled, an exact `wss://` `auth.serviceUrl`, `maxFilterLimitCount=0`, and Negentropy
+disabled. Unsafe core presets refuse startup. Missing, stale, corrupt, oversized,
+wrong-epoch, or wrong-sequence snapshots close reads even for the owner.
+
+The relay starts/restarts its policy process even when idle, invalidates before
+policy commits (including expiry), and checks again at final WebSocket sends.
+Revoked connections terminate; an initially denied connection may retry after a
+grant without re-authenticating. AUTH proves key control, not membership. Multiple
+keys can authenticate per connection; EVENT also requires AUTH, while signed-author
+repair/admission writes do not require reader eligibility. Private COUNT and
+Negentropy are disabled. Slow private clients are disconnected rather than letting
+unguarded library buffers drain or falsely claiming complete history.
+
+Use exactly one participating writer: **do not run import/delete/sync/stream/router
+or external retention against the DB while privately serving**. Stop the relay for
+maintenance and verify a new epoch/projection before reopening. Switching the gate
+off is a disclosure operation. Client private bootstrap/publication/cache isolation
+must also be complete before presenting this as a closed-group product.
 
 The parent initializes the JSONL plugin with a fresh `read-control-init` record
 containing `epoch`, `seq`, and `branch_address`, then sends response-less
@@ -138,8 +157,15 @@ once per second while idle and cannot heartbeat through a blocked scan.
 
 `write-policy.py --check-read-policy [EPOCH SEQ]` validates a recent local snapshot.
 Without a serving epoch/sequence, this is **not proof of live C++ enforcement**.
-The serving gate must independently enforce active epoch, pending sequence,
+The serving gate independently enforces active epoch, pending sequence,
 pre-commit invalidation, monotonic liveness, and final-send authorization.
+
+Isolated regression commands (controlled test keys only):
+
+```sh
+nix-shell --run 'make -j4 && make test-read-gate'
+node test/tests/budabitReadPolicyTest.js
+```
 
 ## Retention
 

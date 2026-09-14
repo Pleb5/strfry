@@ -6,14 +6,18 @@
 void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
     Decompressor decomp;
     QueryScheduler queries;
-    flat_hash_map<uint64_t, Bytes32> connIdToAuthedPubkey;
+    flat_hash_map<uint64_t, AuthKeys> connIdToAuthedPubkey;
 
     queries.onEvent = [&](lmdb::txn &txn, const auto &sub, uint64_t levId, std::string_view eventPayload){
         if (sub.countOnly) return;
+        if (readGate.enabled && readGate.access(sub.connId) != ReadGate::Access::Allowed) {
+            terminateConn(sub.connId);
+            return;
+        }
         auto it = connIdToAuthedPubkey.find(sub.connId);
         auto ev = lookupEventByLevId(txn, levId);
         PackedEventView packed(ev.buf);
-        Bytes32 subscriberAuthedPubkey = it == connIdToAuthedPubkey.end() ? Bytes32() : it->second;
+        auto subscriberAuthedPubkey = it == connIdToAuthedPubkey.end() ? std::vector<Bytes32>{} : it->second.values;
         if (!ReadRestrictor::shouldSendToSubscriber(packed, subscriberAuthedPubkey)) {
             return; 
         }
@@ -36,10 +40,10 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
 
             if (limited) countBody["limited"] = true;
 
-            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "COUNT", sub.subId.str(), countBody })));
+            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "COUNT", sub.subId.str(), countBody })), true);
         } else {
             PROM_INC_RELAY_MSG("EOSE");
-            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "EOSE", sub.subId.str() })));
+            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "EOSE", sub.subId.str() })), true);
             tpReqMonitor.dispatch(sub.connId, MsgReqMonitor{MsgReqMonitor::NewSub{std::move(sub)}});
         }
     };
@@ -52,6 +56,10 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgReqWorker::NewSub>(&newMsg.msg)) {
                 auto connId = msg->sub.connId;
+                if (readGate.enabled && readGate.access(connId) != ReadGate::Access::Allowed) {
+                    terminateConn(connId);
+                    continue;
+                }
 
                 if (!queries.addSub(txn, std::move(msg->sub))) {
                     sendNoticeError(connId, std::string("too many concurrent REQs"));
@@ -59,7 +67,7 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
 
                 queries.process(txn);
             } else if (auto msg = std::get_if<MsgReqWorker::SetAuth>(&newMsg.msg)) {
-                connIdToAuthedPubkey[msg->connId] = msg->authed;
+                connIdToAuthedPubkey[msg->connId].add(msg->authed);
             } else if (auto msg = std::get_if<MsgReqWorker::RemoveSub>(&newMsg.msg)) {
                 queries.removeSub(msg->connId, msg->subId);
                 tpReqMonitor.dispatch(msg->connId, MsgReqMonitor{MsgReqMonitor::RemoveSub{msg->connId, msg->subId}});

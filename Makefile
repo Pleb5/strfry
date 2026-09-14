@@ -36,3 +36,10 @@ test-subid: build/subid_tests
 
 build/subid_tests: test/tests/SubIdTests.cpp build/golpe.h
 	$(CXX) $(CXXFLAGS) $(INCS) $< -o $@
+
+.PHONY: test-read-gate
+test-read-gate: build/read_gate_tests
+	build/read_gate_tests
+
+build/read_gate_tests: test/tests/ReadGateTests.cpp src/apps/relay/ReadGate.h src/apps/relay/AuthSession.h build/golpe.h build/config.h
+	$(CXX) $(CXXFLAGS) $(INCS) $< -o $@ -lcrypto -pthread

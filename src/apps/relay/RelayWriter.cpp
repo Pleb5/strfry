@@ -7,9 +7,34 @@
 void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
     PluginEventSifter writePolicyPlugin;
     NegentropyFilterCache neFilterCache;
+    writePolicyPlugin.privateMode = readGate.enabled;
+    if (readGate.enabled) {
+        writePolicyPlugin.onStop = [&] { readGate.lostPlugin(); };
+        writePolicyPlugin.onStart = [&] {
+            auto epoch = readGate.startEpoch();
+            writePolicyPlugin.sendControl(tao::json::value({
+                {"type", "read-control-init"}, {"epoch", epoch}, {"seq", readGate.pendingSeq},
+                {"branch_address", readGate.branch},
+            }));
+        };
+    }
+    auto committed = [&] {
+        if (!readGate.enabled) return;
+        try {
+            writePolicyPlugin.sendControl(tao::json::value({
+                {"type", "committed"}, {"epoch", readGate.epoch}, {"seq", readGate.pendingSeq},
+            }));
+        } catch (...) { writePolicyPlugin.stop(); }
+    };
 
     while(1) {
         auto newMsgs = thr.inbox.pop_all();
+        if (readGate.enabled) {
+            try {
+                if (readGate.needsRestart()) writePolicyPlugin.stop();
+                writePolicyPlugin.prepare(readGate.plugin);
+            } catch (...) { writePolicyPlugin.stop(); }
+        }
 
         // Filter out messages from already closed sockets
 
@@ -26,7 +51,7 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
                 for (auto &newMsg : newMsgs) {
                     if (auto msg = std::get_if<MsgWriter::AddEvent>(&newMsg.msg)) {
                         if (!closedConns.contains(msg->connId)) newMsgsFiltered.emplace_back(std::move(newMsg));
-                    }
+                    } else newMsgsFiltered.emplace_back(std::move(newMsg));
                 }
 
                 std::swap(newMsgs, newMsgsFiltered);
@@ -36,6 +61,8 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
         // Prepare messages
 
         std::vector<EventToWrite> newEvents;
+        std::vector<uint64_t> expired;
+        bool relevant = false;
 
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgWriter::AddEvent>(&newMsg.msg)) {
@@ -46,6 +73,7 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
                 auto res = writePolicyPlugin.acceptEvent(plugin, plugin.empty() ? tao::json::empty_object : tao::json::from_string(msg->jsonStr), sourceType, msg->ipAddr, msg->authed, okMsg);
 
                 if (res == PluginEventSifterResult::Accept) {
+                    relevant |= writePolicyPlugin.policyRelevant || ReadGate::authorityKind(PackedEventView(msg->packedStr).kind());
                     newEvents.emplace_back(std::move(msg->packedStr), std::move(msg->jsonStr), msg);
                 } else {
                     PackedEventView packed(msg->packedStr);
@@ -55,23 +83,30 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
 
                     sendOKResponse(msg->connId, eventIdHex, res == PluginEventSifterResult::ShadowReject, okMsg);
                 }
+            } else if (auto msg = std::get_if<MsgWriter::Expire>(&newMsg.msg)) {
+                expired.insert(expired.end(), msg->levIds.begin(), msg->levIds.end());
+                relevant = true; // conservative: expiry may remove effective moderation evidence
             }
         }
 
-        if (!newEvents.size()) continue;
+        if (!newEvents.size() && expired.empty()) continue;
 
         // Do write
 
         try {
             auto t0 = std::chrono::steady_clock::now();
             auto txn = env.txn_rw();
+            if (readGate.enabled && relevant) readGate.beforeCommit();
             writeEvents(txn, neFilterCache, newEvents);
+            if (!expired.empty()) deleteEvents(txn, neFilterCache, expired);
             txn.commit();
+            if (readGate.enabled && relevant) committed();
             auto t1 = std::chrono::steady_clock::now();
             auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
             PrometheusMetrics::getInstance().writeTimeUs.inc(us);
             PrometheusMetrics::getInstance().lastWriteBatchSize.set(newEvents.size());
         } catch (std::exception &e) {
+            if (readGate.enabled && relevant) committed(); // rollback also needs a fresh committed projection
             LE << "Error writing " << newEvents.size() << " events: " << e.what();
 
             for (auto &newEvent : newEvents) {

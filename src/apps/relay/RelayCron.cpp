@@ -8,6 +8,22 @@ void RelayServer::runCron() {
 
     cron.setupCb = []{ setThreadName("cron"); };
 
+    std::unique_ptr<hoytech::file_change_monitor> readersWatcher;
+    if (readGate.enabled) {
+        // Watch the directory: snapshots are replaced atomically, not modified
+        // in place. Periodic refresh also covers missed notifications/removal.
+        readersWatcher = std::make_unique<hoytech::file_change_monitor>(readGate.path.substr(0, readGate.path.find_last_of('/')));
+        readersWatcher->setDebounce(20);
+        readersWatcher->run([&] { readGate.refresh(); });
+        cron.repeat(100'000UL, [&] {
+            readGate.refresh();
+            tpWriter.dispatch(0, MsgWriter{MsgWriter::Tick{}});
+            for (auto id : readGate.terminations()) terminateConn(id);
+            // Also resumes deferred live catch-up after a gate installation.
+            if (readGate.available()) tpReqMonitor.dispatchToAll([] { return MsgReqMonitor{MsgReqMonitor::DBChange{}}; });
+        });
+    }
+
 
     // Delete expired events
 
@@ -49,6 +65,10 @@ void RelayServer::runCron() {
         }
 
         if (expiredLevIds.size() > 0) {
+            if (readGate.enabled) {
+                tpWriter.dispatch(0, MsgWriter{MsgWriter::Expire{std::move(expiredLevIds)}});
+                return;
+            }
             auto txn = env.txn_rw();
             NegentropyFilterCache neFilterCache;
 
