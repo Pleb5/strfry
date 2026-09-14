@@ -116,6 +116,13 @@ node test/tests/budabitReadProjectionTest.js # projection only; not C++ read enf
 
 ## Private reader projection and relay gate
 
+Implemented in source, default off; not a claim of a live/private release.
+See [the private operator guide](PRIVATE-READS.md) for fresh configuration,
+preflight/health, invitation, exclusive-writer maintenance and safe rollback.
+The deployment Dockerfile builds the reviewed local checkout (including initialized
+submodules), not the historical pinned public core. Compose checks config/env
+agreement before starting; a private-capable binary and policy must ship together.
+
 `BUDABIT_READ_CONTROL=members` enables a separate committed reader projection,
 requiring one explicit branch, no auto-hosting, the live loader, and non-dry-run
 write enforcement. `off` is the default. **The Python flag alone does not restrict
@@ -137,8 +144,9 @@ unguarded library buffers drain or falsely claiming complete history.
 Use exactly one participating writer: **do not run import/delete/sync/stream/router
 or external retention against the DB while privately serving**. Stop the relay for
 maintenance and verify a new epoch/projection before reopening. Switching the gate
-off is a disclosure operation. Client private bootstrap/publication/cache isolation
-must also be complete before presenting this as a closed-group product.
+off is a disclosure operation. The Budabit private shell now isolates bootstrap,
+publication and memory-only data. It is intentionally limited (200-event archive,
+plain text, no external providers); do not advertise general feature parity.
 
 The parent initializes the JSONL plugin with a fresh `read-control-init` record
 containing `epoch`, `seq`, and `branch_address`, then sends response-less

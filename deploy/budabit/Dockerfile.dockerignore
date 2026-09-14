@@ -1,4 +1,12 @@
 *
+!Makefile
+!golpe.yaml
+!src/
+!src/**
+!golpe/
+!golpe/**
+!external/
+!external/**
 !deploy/
 deploy/*
 !deploy/budabit/
@@ -6,6 +14,18 @@ deploy/budabit/*
 !deploy/budabit/Dockerfile
 !deploy/budabit/write-policy.py
 !deploy/budabit/audit.py
+!deploy/budabit/check-read-control.py
+!deploy/budabit/start-relay.sh
 !deploy/budabit/policy/
 !deploy/budabit/policy/**
 deploy/budabit/policy/**/__pycache__/
+# Never include local object layouts, git metadata, secrets or databases.
+**/.git
+**/.env*
+**/*.o
+**/*.d
+**/*.a
+**/*.so
+**/*.mdb
+**/node_modules
+**/__pycache__

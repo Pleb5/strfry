@@ -11,6 +11,11 @@ whichever source commit a later checkout or rebase happens to select.
 
 ## Current status
 
+**Optional private source preset (not live):** see [PRIVATE-READS.md](PRIVATE-READS.md)
+for config/env preflight, conditional health, invitations, maintenance fences and
+private-capable rollback. The deployment templates now build a reviewed local
+checkout. The live public inventory below remains unchanged by these source edits.
+
 - Public endpoint: `wss://relay.budabit.club`
 - NIP-11 endpoint: `https://relay.budabit.club`
 - Relay name: `Budabit Community Relay`
@@ -96,7 +101,7 @@ The deployment bundle contains:
 
 | File | Purpose |
 | --- | --- |
-| `Dockerfile` | Pinned-source non-root strfry image |
+| `Dockerfile` | Reviewed-checkout non-root strfry image (historical deployments used remote pins) |
 | `compose.yaml` | Runtime isolation, limits, mounts, and health check |
 | `strfry.conf` | Relay protocol and resource configuration |
 | `write-policy.py` | Write-policy entrypoint: storage guard, Budabit community write control, rate limits |
@@ -120,8 +125,8 @@ The current image was built locally as `budabit/strfry:2fc1b38` from:
 - Alpine digest: `sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce`
 
 The build explicitly supplied `--build-arg STRFRY_COMMIT=2fc1b38e27cfb86775a4ccbe3190019d37e63a9f`.
-The source-controlled deployment templates still default to the old `b80cda3`
-core/image; do not mistake those defaults for the live version. The live Compose
+The source-controlled deployment templates now build local source; do not mistake
+their `local-read-control` default for the live version. The live Compose
 file instead selects the already-built new image, has no `build` block, and uses
 `pull_policy: never`.
 
@@ -131,10 +136,11 @@ Dockerfile-specific allowlist. This was a resource precaution, not a strfry
 requirement. The old image was not overwritten or removed. Actual image IDs and
 the rollback tag are recorded in the cutover checkpoint's `images.txt`.
 
-The Docker build clones the exact strfry commit. The build context allowlists
-only the Dockerfile and write-policy source, preventing repository metadata,
-local databases, environment files, and unrelated untracked files from being
-copied into image layers.
+The historical Docker build cloned the exact strfry commit. The updated source
+template instead allowlists core source, initialized vendored dependencies and
+policy/deployment scripts, excluding Git metadata, DBs, environment files and
+object files. Record the reviewed revision and image digest as described in the
+private guide; do not replace a deployed bundle wholesale.
 
 The source commit and Alpine base image are immutable, but `apk add` package
 versions are resolved from the Alpine 3.22 repositories at build time. Rebuilding

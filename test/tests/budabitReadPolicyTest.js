@@ -138,7 +138,13 @@ try {
   const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
   writeFileSync(scanner, `#!/bin/sh\nwhile [ -f ${quote(scanPause)} ]; do sleep 0.02; done\nexec ${quote(path.resolve("strfry"))} "$@"\n`, {mode: 0o700});
   writeFileSync(wrapper, `#!/bin/sh\necho $$ > ${quote(pidPath)}\n${Object.entries(env).map(([k,v]) => `export ${k}=${quote(v)}\n`).join("")}exec python3 ${quote(path.resolve("deploy/budabit/write-policy.py"))}\n`, {mode: 0o700});
+  const preflight = (extra = [], overrides = {}) => spawnSync("python3", ["deploy/budabit/check-read-control.py", "--config", cfg, ...extra], {
+    env: {...process.env, ...env, ...overrides}, encoding: "utf8", timeout: 8000,
+  });
+  assert.equal(preflight(["--config-only"]).status, 0, "fresh private config passes before any snapshot exists");
+  assert.notEqual(preflight(["--config-only"], {BUDABIT_READ_CONTROL: "off"}).status, 0, "mismatched Python mode must not start");
   await start();
+  assert.equal(preflight(["--url", "http://127.0.0.1:40582/"]).status, 0, "live snapshot and serving capability preflight");
   const anonymous = await connect();
   const secretNote = event(owner, 1, [], "retained private note");
   const noAuthWrite = await publish(anonymous, secretNote);
@@ -288,6 +294,20 @@ try {
     assert.equal(result.signal, null, name + " must fail, not hang until killed");
     assert.match(result.stderr, /private reads/);
   }
+  // Roll back a rejected configuration to the last private-capable preset. Never
+  // test rollback by disabling reads or using a pre-gate binary against this DB.
+  writeFileSync(cfg, configText());
+  await start();
+  assert.equal(preflight(["--url", "http://127.0.0.1:40582/"]).status, 0);
+  const rollbackAnon = await connect();
+  await denied(rollbackAnon, {}, "auth-required:");
+  const rollbackOutsider = await connect();
+  await auth(rollbackOutsider, outsider);
+  await denied(rollbackOutsider, {}, "restricted:");
+  const rollbackMember = await connect();
+  await auth(rollbackMember, member);
+  assert((await read(rollbackMember, {kinds: [1], limit: 1})).length > 0);
+  console.log("PASS fresh private preflight, config/env mismatch, and private-capable rollback probes");
 } catch (error) {
   console.error(`Private test failed at ${step}\n${logs.slice(-20000)}`);
   throw error;

@@ -2,8 +2,9 @@
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS build
 
-ARG STRFRY_REPOSITORY=https://github.com/Pleb5/strfry.git
-ARG STRFRY_COMMIT=b80cda3a812af1b662223edad47eb70b053508b6
+# Build the reviewed checkout, not a legacy remote core with a newer Python
+# plugin. Initialize its submodules first. Record the resulting image digest.
+ARG SOURCE_REVISION=local-unreleased
 
 WORKDIR /build
 
@@ -23,13 +24,17 @@ RUN apk add --no-cache \
       zlib-dev \
       zstd-dev
 
-RUN git clone "$STRFRY_REPOSITORY" . \
-    && git checkout --detach "$STRFRY_COMMIT" \
-    && git submodule update --init \
-    && make setup-golpe \
+COPY Makefile golpe.yaml ./
+COPY src ./src
+COPY golpe ./golpe
+COPY external ./external
+RUN test -f src/apps/relay/ReadGate.h \
+    && test -f golpe/external/hoytech-cpp/README.md \
     && make -j2
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+ARG SOURCE_REVISION=local-unreleased
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION
 
 RUN apk add --no-cache \
       ca-certificates \
@@ -50,9 +55,12 @@ RUN apk add --no-cache \
 COPY --from=build /build/strfry /usr/local/bin/strfry
 COPY deploy/budabit/write-policy.py /usr/local/lib/strfry/write-policy.py
 COPY deploy/budabit/audit.py /usr/local/lib/strfry/audit.py
+COPY deploy/budabit/check-read-control.py /usr/local/lib/strfry/check-read-control.py
+COPY deploy/budabit/start-relay.sh /usr/local/lib/strfry/start-relay.sh
 COPY deploy/budabit/policy /usr/local/lib/strfry/policy
 
 RUN chmod 0555 /usr/local/bin/strfry /usr/local/lib/strfry/write-policy.py /usr/local/lib/strfry/audit.py \
+    /usr/local/lib/strfry/check-read-control.py /usr/local/lib/strfry/start-relay.sh \
     && find /usr/local/lib/strfry/policy -type d -exec chmod 0555 {} + \
     && find /usr/local/lib/strfry/policy -type f -exec chmod 0444 {} + \
     && rm -rf /usr/local/lib/strfry/policy/__pycache__ /usr/local/lib/strfry/policy/budabit/__pycache__
@@ -62,5 +70,5 @@ WORKDIR /var/lib/strfry
 
 EXPOSE 7777
 
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/strfry"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/lib/strfry/start-relay.sh"]
 CMD ["relay"]
