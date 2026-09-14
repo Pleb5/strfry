@@ -283,13 +283,14 @@ void RelayServer::ingesterProcessAuth(RelayServerCtx &rsctx, uint64_t connId, co
     if (cfg().relay__auth__serviceUrl.empty()) throw herr("relay needs serviceUrl to be configured before AUTH can work");
 
     std::string packedStr, jsonStr;
-    // Note: kind 22242 is ephemeral, so parseAndVerifyEvent() also applies
-    // the stricter ephemeral recency check here.
-    parseAndVerifyEvent(eventJson, rsctx.secpCtx, true, true, packedStr, jsonStr);
+    // Human/bunker signing can take longer than the ordinary ephemeral cutoff.
+    // Verify the proof normally, then apply its dedicated age limit below.
+    parseAndVerifyEvent(eventJson, rsctx.secpCtx, true, false, packedStr, jsonStr);
 
     PackedEventView packed(packedStr);
 
     if (packed.kind() != 22242) throw herr("wrong event kind, expected 22242");
+    verifyEventTimestamp(packed, cfg().relay__auth__maxAgeSeconds);
 
     auto it = rsctx.connIdToAuthSession.find(connId);
     if (it == rsctx.connIdToAuthSession.end()) throw herr("no auth status available for connection");

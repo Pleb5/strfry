@@ -115,13 +115,13 @@ void verifyNostrEventJsonSize(std::string_view jsonStr) {
     if (jsonStr.size() > cfg().events__maxEventSize) throw herr("event too large: ", jsonStr.size());
 }
 
-void verifyEventTimestamp(PackedEventView packed) {
+void verifyEventTimestamp(PackedEventView packed, std::optional<uint64_t> maxAgeSeconds) {
     auto now = hoytech::curr_time_s();
     auto ts = packed.created_at();
 
     bool isEphemeral = packed.expiration() == 1;
 
-    uint64_t earliest = now - (isEphemeral ? cfg().events__rejectEphemeralEventsOlderThanSeconds : cfg().events__rejectEventsOlderThanSeconds);
+    uint64_t earliest = now - maxAgeSeconds.value_or(isEphemeral ? cfg().events__rejectEphemeralEventsOlderThanSeconds : cfg().events__rejectEventsOlderThanSeconds);
     uint64_t latest = now + cfg().events__rejectEventsNewerThanSeconds;
 
     // overflows

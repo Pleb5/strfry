@@ -8,13 +8,22 @@ import time
 from pathlib import Path
 
 
+# Reports and their retractions can remain effective indefinitely. Retain all
+# events of these kinds; reconstructing authority during pruning is unsafe.
+POLICY_EVIDENCE_KINDS = frozenset((5, 1984, 30000, 32222))
+
+
 def is_replaceable_kind(kind):
     return kind in (0, 3, 41) or 10000 <= kind < 20000 or 30000 <= kind < 40000
 
 
+def is_preserved_kind(kind):
+    return kind in POLICY_EVIDENCE_KINDS or is_replaceable_kind(kind)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Delete old regular events while preserving replaceable events"
+        description="Delete old regular events while preserving replaceable events and moderation evidence"
     )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--days", type=int, default=365)
@@ -55,11 +64,13 @@ def main():
 
     with tempfile.TemporaryFile(mode="w+") as selected_ids:
         selected = 0
+        preserved = 0
         try:
             for line in scan.stdout:
                 event = json.loads(line)
                 kind = int(event["kind"])
-                if is_replaceable_kind(kind):
+                if is_preserved_kind(kind):
+                    preserved += 1
                     continue
 
                 selected += 1
@@ -77,7 +88,7 @@ def main():
         if not args.apply:
             print(
                 f"Dry run: would delete {selected} events older than "
-                f"{args.days} days"
+                f"{args.days} days; preserved {preserved} replaceable/policy events"
             )
             return
 
@@ -105,7 +116,8 @@ def main():
             )
             deleted += len(batch)
 
-        print(f"Deleted {deleted} events older than {args.days} days")
+        print(f"Deleted {deleted} events older than {args.days} days; "
+              f"preserved {preserved} replaceable/policy events")
 
 
 if __name__ == "__main__":

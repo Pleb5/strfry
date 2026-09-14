@@ -21,6 +21,9 @@ config:
   - name: relay__auth__serviceUrl
     desc: "External relay URL (beginning with wss://). Required in order to validate challenge responses."
     default: ""
+  - name: relay__auth__maxAgeSeconds
+    desc: "Maximum age of NIP-42 AUTH proofs, independent of ordinary ephemeral events (allows human signer approval)."
+    default: 600
   - name: relay__auth__restrictedReadKinds
     desc: "Comma-separated list of event kinds that require NIP-42 AUTH to read via REQ/COUNT/NEG-OPEN. Example for DMs: '4,1059'."
     default: "4, 1059"
