@@ -40,6 +40,7 @@ void cmd_relay(const std::vector<std::string> &subArgs) {
 }
 
 void RelayServer::run() {
+    readGate.configure(); // validate before starting any serving threads
     {
         sigset_t set;
         sigemptyset(&set);
@@ -47,10 +48,6 @@ void RelayServer::run() {
         int s = pthread_sigmask(SIG_BLOCK, &set, NULL);
         if (s != 0) throw herr("Unable to set sigmask: ", strerror(errno));
     }
-
-    tpWebsocket.init("Websocket", 1, [this](auto &thr){
-        runWebsocket(thr);
-    });
 
     tpIngester.init("Ingester", cfg().relay__numThreads__ingester, [this](auto &thr){
         runIngester(thr);
@@ -71,6 +68,9 @@ void RelayServer::run() {
     tpNegentropy.init("Negentropy", cfg().relay__numThreads__negentropy, [this](auto &thr){
         runNegentropy(thr);
     });
+
+    tpWebsocket.init("Websocket", 1, [this](auto &thr){ runWebsocket(thr); });
+    while (!websocketReady.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     cronThread = std::thread([this]{
         runCron();

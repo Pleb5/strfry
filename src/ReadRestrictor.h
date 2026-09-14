@@ -10,10 +10,20 @@
 
 struct ReadRestrictor {
 private:
-    inline static uint64_t configVer = 0;
-    inline static flat_hash_set<uint64_t> restrictedKinds_;
+    inline static thread_local uint64_t configVer = 0;
+    inline static thread_local flat_hash_set<uint64_t> restrictedKinds_;
 
 public:
+    static bool shouldSendToSubscriber(const PackedEventView &packed, const std::vector<Bytes32> &keys) {
+        if (keys.empty()) return shouldSendToSubscriber(packed, Bytes32());
+        return std::any_of(keys.begin(), keys.end(), [&](auto key) { return shouldSendToSubscriber(packed, key); });
+    }
+    static bool isFilterAllowedToCount(const NostrFilterGroup &fg, const std::vector<Bytes32> &keys) {
+        if (keys.empty()) return isFilterAllowedToCount(fg, Bytes32());
+        // Conservative for multi-key mixed counts: never broaden the existing
+        // count predicate. Per-event REQ still composes all authenticated keys.
+        return std::any_of(keys.begin(), keys.end(), [&](auto key) { return isFilterAllowedToCount(fg, key); });
+    }
     static void init(){
         parseCommaSeparatedKinds(cfg().relay__auth__restrictedReadKinds, restrictedKinds_);
     }

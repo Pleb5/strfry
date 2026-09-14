@@ -21,6 +21,7 @@
 #include "Decompressor.h"
 #include "PrometheusMetrics.h"
 #include "AuthSession.h"
+#include "ReadGate.h"
 
 
 
@@ -29,6 +30,7 @@ struct MsgWebsocket : NonCopyable {
     struct Send {
         uint64_t connId;
         std::string payload;
+        bool privateData = false;
     };
 
     struct SendBinary {
@@ -44,7 +46,8 @@ struct MsgWebsocket : NonCopyable {
     struct GracefulShutdown {
     };
 
-    using Var = std::variant<Send, SendBinary, SendEventToBatch, GracefulShutdown>;
+    struct Terminate { uint64_t connId; };
+    using Var = std::variant<Send, SendBinary, SendEventToBatch, GracefulShutdown, Terminate>;
     Var msg;
     MsgWebsocket(Var &&msg_) : msg(std::move(msg_)) {}
 };
@@ -60,7 +63,8 @@ struct MsgIngester : NonCopyable {
         uint64_t connId;
     };
 
-    using Var = std::variant<ClientMessage, CloseConn>;
+    struct NewConn { uint64_t connId; };
+    using Var = std::variant<ClientMessage, CloseConn, NewConn>;
     Var msg;
     MsgIngester(Var &&msg_) : msg(std::move(msg_)) {}
 };
@@ -78,7 +82,9 @@ struct MsgWriter : NonCopyable {
         uint64_t connId;
     };
 
-    using Var = std::variant<AddEvent, CloseConn>;
+    struct Tick {};
+    struct Expire { std::vector<uint64_t> levIds; };
+    using Var = std::variant<AddEvent, CloseConn, Tick, Expire>;
     Var msg;
     MsgWriter(Var &&msg_) : msg(std::move(msg_)) {}
 };
@@ -174,7 +180,9 @@ struct RelayServerCtx {
 };
 
 struct RelayServer {
+    ReadGate readGate;
     uS::Async *hubTrigger = nullptr;
+    std::atomic<bool> websocketReady{false};
 
     // Thread Pools
 
@@ -210,11 +218,18 @@ struct RelayServer {
     void runCron();
 
     void runSignalHandler();
+    std::string ensureChallenge(RelayServerCtx &rsctx, uint64_t connId);
 
     // Utils (can be called by any thread)
 
-    void sendToConn(uint64_t connId, std::string &&payload) {
-        tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Send{connId, std::move(payload)}});
+    void sendToConn(uint64_t connId, std::string &&payload, bool privateData = false) {
+        tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Send{connId, std::move(payload), privateData}});
+        hubTrigger->send();
+    }
+
+    void terminateConn(uint64_t connId) {
+        readGate.close(connId);
+        tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Terminate{connId}});
         hubTrigger->send();
     }
 
@@ -236,7 +251,7 @@ struct RelayServer {
         reply += evJson;
         reply += "]";
 
-        sendToConn(connId, std::move(reply));
+        sendToConn(connId, std::move(reply), true);
     }
 
     void sendEventToBatch(RecipientList &&list, std::string &&evJson) {

@@ -90,7 +90,7 @@ struct NegentropyViews {
 void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
     QueryScheduler queries;
     NegentropyViews views;
-    flat_hash_map<uint64_t, Bytes32> connIdToAuthedPubkey;
+    flat_hash_map<uint64_t, AuthKeys> connIdToAuthedPubkey;
 
     auto handleReconcile = [&](uint64_t connId, const SubId &subId, negentropy::StorageBase &storage, const std::string &msg) {
         std::string resp;
@@ -169,7 +169,7 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                 auto ev = lookupEventByLevId(txn, levId);
                 PackedEventView packed(ev.buf);
                 auto it = connIdToAuthedPubkey.find(sub.connId);
-                Bytes32 subscriberAuthedPubkey = it == connIdToAuthedPubkey.end() ? Bytes32() : it->second;
+                auto subscriberAuthedPubkey = it == connIdToAuthedPubkey.end() ? std::vector<Bytes32>{} : it->second.values;
 
                 if (ReadRestrictor::shouldSendToSubscriber(packed, subscriberAuthedPubkey))
                 view->storageVector.insert(packed.created_at(), packed.id());
@@ -266,7 +266,7 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                     handleReconcile(msg->connId, msg->subId, subStorage, msg->negPayload);
                 }
             } else if (auto msg = std::get_if<MsgNegentropy::SetAuth>(&newMsg.msg)) {
-                connIdToAuthedPubkey[msg->connId] = msg->authed;
+                connIdToAuthedPubkey[msg->connId].add(msg->authed);
             } else if (auto msg = std::get_if<MsgNegentropy::NegClose>(&newMsg.msg)) {
                 LI << "[" << msg->connId << "] negentropy CLOSE session=" << msg->subId.sv();
 
