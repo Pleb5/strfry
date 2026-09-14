@@ -408,6 +408,24 @@ class Derived:
         return any(pubkey in grants for grants in self.section_grants.values())
 
 
+def can_read_community(branch, pubkey, *, ready):
+    """Whole-relay reader eligibility, NOT permission to publish any given event.
+
+    The caller must supply a complete committed projection and its readiness;
+    neither an inline write Branch nor a successful signature proves readiness.
+    A successfully scanned empty branch allows only its configured owner to
+    bootstrap. Failed/incomplete projections allow nobody, including the owner.
+    """
+    pubkey = protocol.normalize_pubkey(pubkey)
+    if not ready or branch is None or not pubkey:
+        return False
+    with branch.lock:
+        if not branch.warm:
+            return False
+        derived = branch.derived()
+        return (pubkey == branch.owner or derived.available) and derived.has_any_role(pubkey)
+
+
 class CommunityState:
     """All hosted branches, indexed for fast attribution.
 
