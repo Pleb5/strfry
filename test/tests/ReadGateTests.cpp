@@ -124,6 +124,12 @@ int main() {
     snapshot(2, {owner, member});
     cfg.relay__negentropy__enabled = true; // runtime drift cannot bypass gate
     assert(!gate.available());
+    cfg.relay__negentropy__enabled = false;
+    cfg.relay__auth__restrictedReadKinds += ",1984";
+    assert(!gate.available()); // advertised unfiltered contract cannot change live
+    cfg.relay__auth__restrictedReadKinds = gate.restrictedKinds;
+    cfg.relay__maxFilterLimit--;
+    assert(!gate.available()); // nor may a lower server cap silently truncate
     std::filesystem::remove(gate.path);
     std::filesystem::remove(gate.path + ".core-status.json");
     std::filesystem::remove(directory);

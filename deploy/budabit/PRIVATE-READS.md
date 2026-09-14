@@ -112,6 +112,16 @@ agreement, installed-core projection status and `--check-read-policy` only in me
 `limitation.auth_required: true` plus
 `budabit.read_control: {version: 1, mode: "members", scope: "relay"}`. Check it
 through the intended reverse-proxy path too; no redirect or public fallback.
+The current client additionally requires `read_control.unfiltered_kinds` to cover
+`[1,5,1984,30000,32222]` for complete text/authority intake. The core advertises only
+supported kinds without post-limit involved-key filtering under its active config.
+Default DM restrictions (4/1059) remain unchanged. Do not disable them to make a
+broad history query look complete: the client uses separate disjoint authority
+and text filters, each bounded by `min(200,max_limit)`. Unknown claims/limits or
+saturation keep it partial. Older private-capable cores lacking this optional
+completeness claim remain read-gated but the new client will not claim ready.
+Changing restricted-read settings or maxFilterLimit while privately serving
+invalidates the gate; restart and obtain fresh metadata/AUTH before reopening.
 
 Runtime health compares the Python artifact with the running core's installed
 epoch, exact pending/installed sequence and heartbeat. The core writes a protected

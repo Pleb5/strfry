@@ -32,6 +32,9 @@ struct ReadGate {
     std::mutex refreshMutex;
     bool enabled = false;
     std::string branch, path, serviceUrl, plugin;
+    std::string restrictedKinds;
+    bool restrictToInvolved = true;
+    uint64_t filterLimit = 0;
     uint64_t maxBytes = 0, timeoutSeconds = 3;
     std::string epoch;
     uint64_t pendingSeq = 0, heartbeat = 0;
@@ -106,6 +109,9 @@ struct ReadGate {
         path = cfg().relay__readControl__snapshotPath;
         serviceUrl = cfg().relay__auth__serviceUrl;
         plugin = cfg().relay__writePolicy__plugin;
+        restrictedKinds = cfg().relay__auth__restrictedReadKinds;
+        restrictToInvolved = cfg().relay__auth__restrictReadToInvolvedPubkey;
+        filterLimit = cfg().relay__maxFilterLimit;
         maxBytes = cfg().relay__readControl__maxSnapshotBytes;
         timeoutSeconds = cfg().relay__readControl__gateTimeoutSeconds;
         if (branch.size() != 135 || !branch.starts_with("32222:") || branch[70] != ':'
@@ -121,6 +127,9 @@ struct ReadGate {
     bool configMatchesLocked() const {
         return cfg().relay__auth__enabled && cfg().relay__auth__serviceUrl == serviceUrl
             && cfg().relay__writePolicy__plugin == plugin && cfg().relay__maxFilterLimitCount == 0
+            && cfg().relay__auth__restrictedReadKinds == restrictedKinds
+            && cfg().relay__auth__restrictReadToInvolvedPubkey == restrictToInvolved
+            && cfg().relay__maxFilterLimit == filterLimit
             && !cfg().relay__negentropy__enabled;
     }
     void unavailableLocked() {

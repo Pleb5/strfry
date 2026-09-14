@@ -219,7 +219,7 @@ try {
   assert((await read(restored)).some(ev => ev.id === secretNote.id));
   const info = await (await fetch("http://127.0.0.1:40582", {headers: {accept: "application/nostr+json"}})).json();
   assert.equal(info.limitation.auth_required, true);
-  assert.deepEqual(info.budabit.read_control, {version: 1, mode: "members", scope: "relay"});
+  assert.deepEqual(info.budabit.read_control, {version: 1, mode: "members", scope: "relay", unfiltered_kinds: [1, 5, 1984, 30000, 32222]});
   assert(!info.supported_nips.includes(45) && !info.supported_nips.includes(77));
   assert(!JSON.stringify(info).includes(branch));
   // Corruption/removal/oversize/old-epoch files are failures, never old-set fallback.
