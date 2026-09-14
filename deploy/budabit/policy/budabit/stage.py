@@ -13,6 +13,7 @@ class BudabitWriteControl(Stage):
     name = "budabit"
 
     def __init__(self, config, metrics=None, scanner=None, start_loader=True):
+        config.validate_read_control()
         self.config = config
         self.metrics = metrics or Metrics()
         self.state = CommunityState(config.branches)
@@ -73,6 +74,8 @@ class BudabitWriteControl(Stage):
         outcome = request.annotations.get("budabit")
         if outcome is None or not outcome.authority:
             return
+        if self.config.read_control == "members":
+            request.annotations["policyRelevant"] = True
         if outcome.reason == "auto_host":
             address = P.get_addressable_address(request.event)
             branch = self.state.add_branch(address, auto=True)
