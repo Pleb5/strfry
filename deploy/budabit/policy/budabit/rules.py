@@ -20,6 +20,7 @@ AUTHORITY_KINDS = {
 TARGETABLE_KINDS = {31922, 31923, 9041, 1623, 30033}
 PROTECTED_DELETE_KINDS = {P.COMMUNITY_DEFINITION_KIND, P.PROFILE_LIST_KIND}
 PROTECTED_DELETE_MESSAGE = "blocked: Deletion of kinds 32222 and 30000 is not allowed"
+LOADING_MESSAGE = "error: relay policy is loading, retry shortly"
 
 PERSONAL_KINDS = {
     0,
@@ -43,7 +44,7 @@ class Outcome:
     reason: str = ""
     authority: bool = False
     community_id: str = ""
-    scope: str = "passthrough"  # passthrough | hosted | authority
+    scope: str = "passthrough"  # passthrough | hosted | authority | initializing
 
     @property
     def accepted(self):
@@ -106,10 +107,11 @@ def _availability(branch, derived):
     # Ordinary hosted content needs the complete snapshot (definition, shards,
     # reports); grants without bans would fail open. Authority events that
     # bootstrap the branch (definitions, referenced shards, deletes) are
-    # handled before this point and do not wait.
+    # handled before this point and do not wait, once the stage's process-wide
+    # initial authority load has completed.
     if not branch.warm:
         return _reject(
-            "error: relay policy is loading, retry shortly",
+            LOADING_MESSAGE,
             "warming_up",
             branch.community_id,
         )
@@ -354,7 +356,7 @@ def _strict_passthrough(event, state, config):
     if kind in PERSONAL_KINDS or kind in TARGETABLE_KINDS:
         # Role-based exceptions need the complete snapshot (grants and bans).
         if any(not branch.warm for branch in branches):
-            return _reject("error: relay policy is loading, retry shortly", "warming_up")
+            return _reject(LOADING_MESSAGE, "warming_up")
     if kind in PERSONAL_KINDS:
         if any(branch.derived().has_any_role(pubkey) for branch in branches):
             return _accept("passthrough", reason="strict_participant_personal")

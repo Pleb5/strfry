@@ -15,6 +15,12 @@ for verified checkpoints, the restore-limit and Compose-path failures, and
 the safe cutover procedure. A later documentation commit or rebase does not
 change the image already running on the VPS.
 
+**2026-09-14 follow-up:** a live outsider write exposed an auto-host initialization
+race in the deployed `2fc1b38` policy. Warm-state thread rejection was separately
+verified. The source now has a readiness barrier and cold-ingestion regression
+tests; no replacement VPS image is recorded as deployed yet. See
+[INCIDENT-2026-09-14.md](INCIDENT-2026-09-14.md).
+
 ## Host layout
 
 - Existing deployment bundle (**not a Git checkout**): `/opt/strfry`
@@ -69,6 +75,14 @@ for the expected exact addresses, valid/warm definitions, and missing shards:
 `--check-policy` can succeed with no auto-discovered branches and does not
 guarantee that every referenced permission list is present.
 
+In the fixed source, every plugin instance temporarily rejects new writes until
+its complete initial load succeeds, even in dry-run. Initial failures retry with
+bounded backoff; unrelated passthrough and normal bootstrap resume after loading.
+Known protected deletions retain their permanent denial. This adds no per-event
+DB scan and does not change the best-effort freshness of subsequent reconciliation.
+The core still launches the persistent plugin lazily; separate health commands
+do not initialize that ingestion process.
+
 Deletion history is loaded only through scoped scans, not full per-author
 kind:5 scans. Missing inline definitions/shards are remembered after a 60 s
 grace so replays cannot repeatedly restore grants. After restart, an unobserved
@@ -95,6 +109,7 @@ Tests (from the repository root):
 ```sh
 python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
 node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
+node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure recovery
 ```
 
 ## Retention

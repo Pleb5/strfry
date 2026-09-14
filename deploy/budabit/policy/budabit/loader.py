@@ -1,9 +1,10 @@
 """Warm-up and reconcile branch state from the relay's own LMDB.
 
-Runs in a background thread so the request loop never blocks. Uses
-``strfry scan`` (read-only LMDB access from a second process) rather than a
-WebSocket client, which keeps the plugin dependency-free. Events found in
-storage are fed through the same ``Branch.apply`` as inline writes.
+Runs in a background thread so the request loop never blocks. Uses logical
+``strfry scan`` queries from a second process rather than a WebSocket client,
+which keeps the plugin dependency-free. Events found in storage are fed through
+the same ``Branch.apply`` as inline writes. Ingestion stays fail-closed until
+this loader completes its initial pass; an empty undiscovered map is not ready.
 """
 
 import json
@@ -57,11 +58,15 @@ class Loader:
         self.reconcile_seconds = reconcile_seconds
         self.auto_host_url = auto_host_url
         self.clock = clock or time.monotonic
-        self.sleep = sleep or time.sleep
         self.stop_event = threading.Event()
+        self.sleep = sleep or self.stop_event.wait
         self.thread = None
         self.last_error = ""
         self.last_reconcile_at = None
+        # An empty map before discovery is not evidence that nothing is hosted.
+        # Latch only after a complete successful initial load; ordinary refresh
+        # failures must not discard the initialized view or reopen passthrough.
+        self.initialized = False
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -73,14 +78,23 @@ class Loader:
         self.stop_event.set()
 
     def run(self):
-        try:
-            self.warm_up()
-        except Exception as error:  # noqa: BLE001 - keep the relay alive
-            self.last_error = str(error)
-            self.metrics.log("loader_error", phase="warm_up", error=str(error)[:300])
+        retry_seconds = 1.0
+        while not self.stop_event.is_set():
+            try:
+                self.warm_up()
+                break
+            except Exception as error:  # noqa: BLE001 - keep the relay alive
+                self.last_error = str(error)
+                self.metrics.log("loader_error", phase="warm_up", error=str(error)[:300])
+            # Retry initialization without waiting a full reconcile interval,
+            # but never let incoming events trigger scans or a busy retry loop.
+            self.sleep(retry_seconds)
+            retry_seconds = min(retry_seconds * 2, 30.0)
         next_reconcile = self.clock() + self.reconcile_seconds
         while not self.stop_event.is_set():
             self.sleep(1.0)
+            if self.stop_event.is_set():
+                break
             now = self.clock()
             due = now >= next_reconcile or any(
                 branch.needs_reconcile for branch in self.state.branches.values()
@@ -142,6 +156,10 @@ class Loader:
             )
         self.unhost_stale()
         self.last_reconcile_at = self.clock()
+        self.last_error = ""
+        if not self.initialized:
+            self.initialized = True
+            self.metrics.log("initial_load_complete", branches=len(self.state.branches))
 
     def reconcile(self):
         self.discover()

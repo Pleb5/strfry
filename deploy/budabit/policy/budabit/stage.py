@@ -40,6 +40,24 @@ class BudabitWriteControl(Stage):
     def evaluate(self, request, now):
         if not self.config.enabled:
             return None
+        if self.loader is not None and not self.loader.initialized:
+            # Strfry starts/restarts a persistent plugin on demand. Its first
+            # event must not race background discovery and pass as "unhosted".
+            # Gate all writes until this instance has a complete initial view;
+            # even dry-run cannot waive readiness. Keep known protected-delete
+            # denials permanent rather than advising a pointless retry.
+            outcome = None
+            if request.kind == P.DELETE_KIND:
+                outcome = rules.evaluate(request.event, self.state, self.config)
+            if outcome is None or outcome.accepted:
+                outcome = rules.Outcome(
+                    Decision.reject(rules.LOADING_MESSAGE),
+                    "warming_up",
+                    scope="initializing",
+                )
+            request.annotations["budabit"] = outcome
+            self.metrics.decision(request, outcome)
+            return outcome.decision
         outcome = rules.evaluate(request.event, self.state, self.config)
         request.annotations["budabit"] = outcome
         self.metrics.decision(request, outcome, dry_run=self.config.dry_run)
@@ -82,6 +100,8 @@ class BudabitWriteControl(Stage):
         if not self.config.enabled:
             return True, ""
         problems = []
+        if self.loader is not None and not self.loader.initialized:
+            problems.append("initial authority load not complete")
         for branch in list(self.state.branches.values()):
             if not branch.warm:
                 problems.append(f"{branch.community_id[:8]} not warm")

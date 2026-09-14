@@ -4,14 +4,15 @@
 Pipeline (first rejection wins):
 
 1. storage guard   - database size / free space
-2. budabit         - Communikeys V2 community write control (when
-                     BUDABIT_BRANCHES is set)
+2. budabit         - Communikeys V2 community write control (when branches
+                     or auto-host are configured); no writes pass until
+                     the live plugin's initial authority load completes
 3. rate limits     - per pubkey, per source, global token buckets
 
 Usage:
     write-policy.py                  # plugin mode (JSONL on stdin/stdout)
     write-policy.py --check-storage  # exit 1 when the storage guard rejects
-    write-policy.py --check-policy   # exit 1 when a hosted branch is not usable
+    write-policy.py --check-policy   # load/check a fresh snapshot, not live ingestion readiness
     write-policy.py --status         # print branch state as JSON
     write-policy.py --nip11-extra    # print the relay.info.extra JSON advertising enforcement
     write-policy.py --replay FILE [lmdb+export|export]

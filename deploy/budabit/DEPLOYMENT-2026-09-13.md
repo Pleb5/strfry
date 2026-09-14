@@ -6,6 +6,12 @@ did not log into or deploy to the VPS. See [RUNBOOK.md](RUNBOOK.md) for ongoing
 operations. Paths and counts here are a dated snapshot, not discovery defaults
 for a different host or a future upgrade.
 
+**Follow-up:** [the 2026-09-14 incident](INCIDENT-2026-09-14.md) confirmed an
+unauthorized first write during plugin auto-host discovery. The administrative
+checks recorded here passed, but did not prove the cold live-ingestion path was
+safe. Preserve this historical evidence without treating it as a resolved
+enforcement guarantee; the incident records the source fix and deployment status.
+
 ## Deployed result
 
 | Item | Verified state |

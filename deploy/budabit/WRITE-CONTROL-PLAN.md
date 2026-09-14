@@ -9,6 +9,10 @@ week-long dry-run plan is superseded by the verified rollout in
 [DEPLOYMENT-2026-09-13.md](DEPLOYMENT-2026-09-13.md). Target: `deploy/budabit/`
 on the Pleb5 strfry fork (`master`, which tracks upstream `hoytech/strfry` master).
 
+The deployed revision subsequently failed a cold-ingestion outsider test on
+2026-09-14. The source readiness fix below is covered by new startup/reload tests;
+it is not yet recorded as deployed. See [INCIDENT-2026-09-14.md](INCIDENT-2026-09-14.md).
+
 Implementation note discovered during phase 1: strfry treats every `a`
 tag on a `kind:5` as an NIP-09 target and rejects the event when the
 address pubkey differs from the signer. Budabit's report retractions,
@@ -327,10 +331,15 @@ is respawned. Consequences:
 
 - The request loop must never block on I/O. State loading runs in a
   background thread; the request thread reads a snapshot under a lock.
-- Warm-up must not be synchronous at startup (a respawn loop would follow if
-  it exceeded the timeout). While a branch is not yet warm, hosted-branch
-  events get `error: relay policy is loading, retry shortly`; passthrough
-  traffic is unaffected. Consider raising `timeoutSeconds` to 5 for headroom.
+- Loading remains asynchronous, but **all new writes wait for a complete initial
+  load of the live plugin instance**. They receive `error: relay policy is loading,
+  retry shortly` without blocking on the scanner or queuing events; known
+  protected deletions retain their permanent denial. Dry-run cannot bypass this
+  readiness gate. Initial failures retry with bounded backoff. After initialization,
+  per-branch warm-up rules apply and unrelated passthrough works normally.
+- Strfry launches/replaces a persistent plugin on demand; it does not create a
+  process per event. The readiness gate covers every instance. Eager launch is
+  not implemented here and would not eliminate the need for a gate on respawn.
 - The plugin is reloaded when the script mtime changes (single-token
   command). Deployment must therefore install atomically (`mv`), and the
   plugin must rebuild state quickly (§4.3).
@@ -453,6 +462,12 @@ Policy health rejects loader errors and unavailable explicit branches, but can
 succeed with no auto-discovered branches or with missing permission lists.
 Require expected exact addresses and inspect shard presence in `--status`.
 
+In the fixed source, stage health also rejects an incomplete initial load of
+that instance. A standalone `--check-policy` invocation loads its own state,
+not the live ingestion process. Actual cold-write regression tests and the
+ingestion `initial_load_complete` log are necessary to avoid the earlier false
+readiness inference.
+
 ---
 
 ## 5. Interaction with strfry core behaviour
@@ -556,6 +571,11 @@ required. See the dated deployment record for checkpoints and safeguards.
 4. **Optional replay**: `audit.py` can evaluate historical content against
    current authority, but this is not a restore-integrity check or rollout
    prerequisite. Any sweep requires separate operator authorization.
+5. **Cold auto-host ingestion**: `test/tests/budabitStartupTest.js` seeds an
+   isolated LMDB and gates the actual ingestion scanner. A successful independent
+   health check must not let the first outsider event through. Verify cold/warm
+   replies and stored IDs, then force a plugin reload and scan failure and check
+   recovery. No external relay, live account, or global freshness assumption.
 
 ---
 
@@ -601,11 +621,12 @@ required. See the dated deployment record for checkpoints and safeguards.
   side refuses makes the relay reject a definition the client accepts —
   fail-closed, visible via `--check-policy`, and the case golden vectors
   must pin.
-- **Warm-up.** Ordinary hosted content is rejected with `error: … loading`
-  until the loader has read definition, shards, *and* reports for the
-  branch; accepting on definition+grants alone would fail open on stored
-  bans. Bootstrap authority events (definitions, referenced shards, kind 5)
-  do not wait.
+- **Warm-up.** Every new write is gated until this plugin instance completes
+  its full initial load; undiscovered must not mean unhosted. Afterwards,
+  ordinary hosted content is rejected with `error: … loading` until its branch
+  has definition, shards, *and* reports. Bootstrap authority updates can then
+  proceed without waiting for a per-branch refresh. No stronger cross-relay
+  freshness guarantee is introduced.
 - **Following storage.** Same-author deleted ids learned from kind:5 events
   seen inline or in the scoped `#a`/`#h` scans are remembered per branch.
   There is no per-author kind:5 history scan and no complete reload of

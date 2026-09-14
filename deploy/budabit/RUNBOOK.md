@@ -32,6 +32,13 @@ whichever source commit a later checkout or rebase happens to select.
 - Event retention: one year for normal events
 - Router, stream, and external relay sync: not configured
 
+**Known issue in that deployed image (2026-09-14):** the first outsider room
+message raced lazy plugin initialization and was stored before auto-host discovery.
+A later warm-state thread write was rejected correctly. The readiness fix and
+regression tests are in source, not yet recorded as deployed. See the
+[incident record](INCIDENT-2026-09-14.md); September health/metadata checks alone
+must not be described as proof of correct cold-ingestion enforcement.
+
 Strfry does not fetch events from other relays by itself. Events appear here
 only when Budabit, a Nostr client, or a future administrative sync operation
 explicitly publishes them.
@@ -322,6 +329,16 @@ with **zero auto-discovered branches**. It also does not require every reference
 shard to exist. Use `--status` to verify expected addresses and missing lists;
 `shard_missing` warns of unavailable authority. Do not infer enforcement readiness
 from a green container alone.
+
+The fixed source also checks completion of that instance's full initial load.
+Until completion, no new writes pass (including ordinary passthrough and
+bootstrap updates); the response is the transient loading error, except known
+protected deletions keep their permanent denial. Initial failures retry with
+capped backoff. The ingestion process logs `initial_load_complete` on success.
+`docker exec ... --check-policy` and `--status` still load **separate instances**:
+use the live process's logs and actual cold-ingestion tests, not those commands
+alone, to establish startup safety. No eager-launch change or stronger global
+authority-freshness guarantee is implied.
 
 NIP-11: advertise enforcement so clients and auditors can see it. Generate
 the value with `write-policy.py --nip11-extra` and paste it into

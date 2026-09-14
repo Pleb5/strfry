@@ -35,6 +35,10 @@ node "./test/tests/budabitPolicyTest.js" \
   && pass "./test/tests/budabitPolicyTest.js" \
   || fail "./test/tests/budabitPolicyTest.js failed"
 
+node "./test/tests/budabitStartupTest.js" \
+  && pass "./test/tests/budabitStartupTest.js" \
+  || fail "./test/tests/budabitStartupTest.js failed"
+
 info "Seeding events..."
 
 perl "./test/utils/generate-seed-data.pl" -o - | ./strfry --config ./test/cfgs/test.conf import --no-verify
