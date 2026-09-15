@@ -288,18 +288,23 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
     }
 
     if (shouldRejectReq) {
+        if (!cfg().relay__auth__enabled || cfg().relay__auth__serviceUrl.empty()) {
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({
+                "CLOSED", outSubIdStr, "restricted: protected reads require relay AUTH support"})));
+            return;
+        }
         if (!hasSession) {
             auto challenge = rsctx.challengeGenerator.get();
             rsctx.connIdToAuthSession.emplace(connId, challenge);
             LI << "[" << connId << "] Requesting initial AUTH";
             sendAuthChallenge(connId, challenge);
-            sendClosedError(connId, outSubIdStr, "auth-required: requested filter requires authentication");
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, "auth-required: requested filter requires authentication"})));
         } else if (countOnly && isAuthed) {
             sendClosedError(connId, outSubIdStr, "count-failed: can only count events you are involved in");
         } else {
             auto challenge = it->second.challengeSv();
             sendAuthChallenge(connId, challenge);
-            sendClosedError(connId, outSubIdStr, "auth-required: requested filter requires authentication");
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, "auth-required: requested filter requires authentication"})));
         }
         return;
     }
