@@ -16,6 +16,11 @@ for config/env preflight, conditional health, invitations, maintenance fences an
 private-capable rollback. The deployment templates now build a reviewed local
 checkout. The live public inventory below remains unchanged by these source edits.
 
+The replacement source uses plugin-owned REQ admission and periodic rechecks,
+not committed reader snapshots. Source defaults now protect kind4444 independently
+and disable NIP-70 semantics unless opted in; these changes are **not** evidence
+that the recorded live image below has been upgraded.
+
 - Public endpoint: `wss://relay.budabit.club`
 - NIP-11 endpoint: `https://relay.budabit.club`
 - Relay name: `Budabit Community Relay`
@@ -105,6 +110,7 @@ The deployment bundle contains:
 | `compose.yaml` | Runtime isolation, limits, mounts, and health check |
 | `strfry.conf` | Relay protocol and resource configuration |
 | `write-policy.py` | Write-policy entrypoint: storage guard, Budabit community write control, rate limits |
+| `read-policy.py` | Separate cached membership plugin for REQ admission and periodic connection rechecks |
 | `policy/` | Policy stages; `policy/budabit/` implements Communikeys V2 write control |
 | `audit.py` | Read-only replay of stored community content against the current rules |
 | `sweep.py` | Deletes audit-listed events (person-banned authors by default) |
