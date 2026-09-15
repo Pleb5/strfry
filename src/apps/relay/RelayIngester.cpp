@@ -148,7 +148,7 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
     Bytes32 authedPubkey;
     if (readAdmission.enabled) authedPubkey = rsctx.connIdToAuthSession.at(connId).authed;
 
-    {
+    if (cfg().relay__nip70__enabled) {
         // discard reposts that embed protected events
         if (packed.kind() == 6 || packed.kind() == 16) {
             if (origJson.at("content").get_string().find("[\"-\"]") != std::string::npos) {

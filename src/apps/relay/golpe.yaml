@@ -55,6 +55,10 @@ config:
     desc: "Limit additional restricted kinds to event author/p-tag participants (always required for DM kinds 4,1059,4444). COUNT must be safely participant-scoped."
     default: true
 
+  - name: relay__nip70__enabled
+    desc: "Enforce and advertise NIP-70 protected-event semantics; off ignores protection tags"
+    default: false
+
   - name: relay__info__name
     desc: "NIP-11: Name of this server. Short/descriptive (< 30 characters)"
     default: "strfry default"
