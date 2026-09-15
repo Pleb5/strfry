@@ -111,10 +111,13 @@ python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 
 node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
 node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure recovery
 node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regression
-node test/tests/budabitReadProjectionTest.js # projection only; not C++ read enforcement
+node test/tests/readAdmissionTest.js # real core, generic fixture plugin
+node test/tests/budabitReadAdmissionTest.js # real core + Python membership + LMDB
+node test/tests/dm4444Test.js # independent DM participant privacy
+node test/tests/nip70Test.js # default-off NIP-70 switch
 ```
 
-## Private reader projection and relay gate
+## Plugin-owned private REQ admission
 
 Implemented in source, default off; not a claim of a live/private release.
 See [the private operator guide](PRIVATE-READS.md) for fresh configuration,
@@ -123,56 +126,45 @@ The deployment Dockerfile builds the reviewed local checkout (including initiali
 submodules), not the historical pinned public core. Compose checks config/env
 agreement before starting; a private-capable binary and policy must ship together.
 
-`BUDABIT_READ_CONTROL=members` enables a separate committed reader projection,
-requiring one explicit branch, no auto-hosting, the live loader, and non-dry-run
-write enforcement. `off` is the default. **The Python flag alone does not restrict
-relay reads.** The independent `relay.readControl.enabled` C++ switch must also be
-enabled, with a matching pinned `branchAddress` and absolute `snapshotPath`, AUTH
-enabled, an exact `wss://` `auth.serviceUrl`, `maxFilterLimitCount=0`, and Negentropy
-disabled. Unsafe core presets refuse startup. Missing, stale, corrupt, oversized,
-wrong-epoch, or wrong-sequence snapshots close reads even for the owner.
+Configure `relay.readPolicy.plugin` to the separate `read-policy.py` executable and
+set `BUDABIT_READ_CONTROL=members`. One `BUDABIT_BRANCHES` address is configured in
+Python only; no C++ branch pin, reader roster, snapshot files or commit barriers.
+The preset requires enforcing write control, no auto-host/dry-run, AUTH with an
+exact service URL, COUNT=0 and disabled Negentropy. The Python flag alone does not
+restrict the relay. Missing/broken configured plugins never permit reads.
 
-The relay starts/restarts its policy process even when idle, invalidates before
-policy commits (including expiry), and checks again at final WebSocket sends.
-Revoked connections terminate; an initially denied connection may retry after a
-grant without re-authenticating. AUTH proves key control, not membership. Multiple
-keys can authenticate per connection; EVENT also requires AUTH, while signed-author
-repair/admission writes do not require reader eligibility. Private COUNT and
-Negentropy are disabled. Slow private clients are disconnected rather than letting
-unguarded library buffers drain or falsely claiming complete history.
+Valid AUTH receives OK true. Each REQ then gets one plugin membership decision
+before a query or live subscription is installed. Nonmembers receive CLOSED with
+`restricted:` and are disconnected. Active connections are rechecked every five
+seconds through the same plugin; no per-event community checks. Retry after a
+grant uses a fresh connection and AUTH. Write authorization remains separate.
 
-Use exactly one participating writer: **do not run import/delete/sync/stream/router
-or external retention against the DB while privately serving**. Stop the relay for
-maintenance and verify a new epoch/projection before reopening. Switching the gate
-off is a disclosure operation. The Budabit private shell now isolates bootstrap,
-publication and memory-only data. It is intentionally limited (200-event archive,
-plain text, no external providers); do not advertise general feature parity.
+Python refreshes an in-memory reader cache from bounded local scans (one-second
+refresh interval, five-second scan budget, ten-second maximum successful-view age).
+This is deliberately eventually consistent: a grant/ban can take a refresh plus
+the next connection recheck to affect delivery. Concurrent scans are not fenced
+against commits. Failed refreshes do not renew policy age. See the operator guide
+for timing, failure behavior and the version-2 NIP-11 declaration.
 
-The parent initializes the JSONL plugin with a fresh `read-control-init` record
-containing `epoch`, `seq`, and `branch_address`, then sends response-less
-`committed` records after storage transactions. Accepted authority writes carry
-optional `policyRelevant:true`. No reader snapshot appears on stdout.
+`read-policy.py --check-policy` performs an independent fresh scan;
+`check-read-control.py` checks wiring and optionally NIP-11. Neither proves the
+running plugin is current or that a particular member can read. Use real
+authenticated member/outsider probes before opening ingress.
 
-Snapshots are atomically replaced at `BUDABIT_READ_SNAPSHOT_PATH` (default next to
-`STRFRY_POLICY_DB_FILE`, named `budabit-readers.json`); sibling `.status.json`
-contains health/counts, not the roster. Both are operator-private mode-0600 files.
-The reader set is rebuilt from a fresh Branch, never speculative accepted writes.
-Defaults: `BUDABIT_READ_MAX_PUBKEYS=20000`, `BUDABIT_READ_MAX_SNAPSHOT_BYTES=2097152`,
-`BUDABIT_READ_SCAN_MAX_BYTES=33554432`, `BUDABIT_READ_SCAN_TIMEOUT_SECONDS=30`.
-Byte/time budgets cover an entire rebuild; malformed/incomplete/oversize scans
-produce unavailable snapshots, not partial lists. The worker refreshes snapshots
-once per second while idle and cannot heartbeat through a blocked scan.
+Keep maintenance offline; do not disable admission to repair a private database.
+Budabit retains private invitations, publication isolation, memory-only data and
+bounded complete-authority requirements. Discoverability/application exceptions
+and full public-feature parity are not part of this mode.
 
-`write-policy.py --check-read-policy [EPOCH SEQ]` validates a recent local snapshot.
-Without a serving epoch/sequence, this is **not proof of live C++ enforcement**.
-The serving gate independently enforces active epoch, pending sequence,
-pre-commit invalidation, monotonic liveness, and final-send authorization.
+Independently, kind4444 (and retained kind4/1059) reads always require an authenticated
+participant, even with community admission off or optional kind restrictions empty.
+NIP-70 now defaults off: ignore its protection semantics, preserve signed tags and
+all unrelated rules, and do not advertise NIP-70 unless enabled explicitly.
 
 Isolated regression commands (controlled test keys only):
 
 ```sh
-nix-shell --run 'make -j4 && make test-read-gate'
-node test/tests/budabitReadPolicyTest.js
+nix-shell --run 'make -j4 && make test-read-admission'
 ```
 
 ## Retention

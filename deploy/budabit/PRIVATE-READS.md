@@ -1,218 +1,157 @@
-# Operating an optional private community relay
+# Member-only REQ admission: operator guide
 
-Implemented, default off; **not deployed to the public Budabit relay**. This guide
-describes the source implementation, not the public deployment recorded in
-[RUNBOOK.md](RUNBOOK.md). Keep the existing public endpoint public unless a
-separately reviewed disclosure/migration procedure says otherwise.
+Default off, implemented in source, not a claim about the recorded public live
+deployment. [Architecture](READ-CONTROL-PLAN.md); [live inventory](RUNBOOK.md).
 
-## Deployment levels and scope
+## What is private
 
-1. Client moderation only: no Budabit branch or auto-host configuration.
-2. Public reads + relay write moderation: enforce explicit or auto-hosted branches;
-   leave both read switches off.
-3. Member-only reads: one explicit `32222:<owner>:<communityId>` branch per
-   endpoint/database, enforcing non-dry-run writes, no auto-hosting, and both read
-   switches on. All retained history is readable by eligible members. AUTH proves
-   key control, not membership; author-based write admission remains separate.
+One community governs the whole endpoint/database. All stored kinds remain behind
+membership, including definitions, profiles, lists and forms. AUTH proves key
+control, not membership. Each REQ is admitted once by a separate Python plugin.
+Existing connections with subscriptions are rechecked periodically and disconnected
+on denial. A configured plugin that fails never turns into public access.
 
-The owner can bootstrap an empty relay only after a complete committed scan.
-Missing/incomplete/stale policy blocks owner reads too. AUTH and signed-author
-repair writes remain available while read policy is unavailable. Revoked sockets
-terminate; an initially denied, still-authenticated socket can retry after a grant.
+The owner can bootstrap a missing definition only after a successful complete load.
+Ordinary members need the existing structural/moderator/any-section-grant role and
+must not be banned. Writes still use signed-author rules, not general readership.
+This is not encryption, prevention of copying, or retraction of previously public data.
 
-## Prepare and validate without opening public ingress
+## Configure the replacement explicitly
 
-- Use a separate endpoint and DB, writable only by the relay UID (10001 in Compose).
-  Disable any external sync/import/router/stream/sweep/retention jobs for this DB.
-- Initialize submodules in a reviewed source checkout (`git submodule update --init`
-  then `make setup-golpe`). The deployment Dockerfile now builds **that checkout**,
-  not a pinned legacy remote binary with a newer Python plugin. The Docker-specific
-  context allowlist excludes DBs, environment files, Git metadata and object files.
-- Build and record the image ID/digest and source revision before promotion:
+Copy and edit `strfry.conf` in an operator-owned file; do not edit generated/runtime
+configuration. Use the existing nested config blocks, not dotted assignments.
 
-  ```sh
-  export STRFRY_SOURCE_REVISION="$(git rev-parse HEAD)"
-  export STRFRY_IMAGE="budabit/strfry:private-${STRFRY_SOURCE_REVISION}"
-  docker compose -f deploy/budabit/compose.yaml build relay
-  ```
-
-  Review `git status` first. A revision label cannot prove an uncommitted checkout
-  is clean. Because Git metadata is excluded, the native version inside this image
-  can say `no-git-commits`; retain the image revision label and digest as provenance.
-  No private-capable image tag is claimed to be published by this document.
-
-Copy the sample config to an operator-private file (do not edit live/generated
-configuration or commit secrets). Set:
-
-```text
-relay.auth.enabled = true
-relay.auth.serviceUrl = "wss://private.example/path"
-relay.auth.maxAgeSeconds = 600
-relay.readControl.enabled = true
-relay.readControl.branchAddress = "32222:<owner>:<communityId>"
-relay.readControl.snapshotPath = "/var/lib/strfry/db/budabit-readers.json"
-relay.readControl.maxSnapshotBytes = 2097152
-relay.readControl.gateTimeoutSeconds = 3
-relay.readControl.proactiveChallenge = true
-relay.readControl.advertiseBranch = false
-relay.maxFilterLimitCount = 0
-relay.negentropy.enabled = false
+```conf
+relay {
+    auth {
+        enabled = true
+        serviceUrl = "wss://private.example/"
+        maxAgeSeconds = 600
+    }
+    readPolicy {
+        plugin = "/usr/local/lib/strfry/read-policy.py"
+        timeoutSeconds = 2
+        recheckSeconds = 5
+        maxPending = 1024
+        maxConnections = 4096
+    }
+    writePolicy {
+        plugin = "/usr/local/lib/strfry/write-policy.py"
+        timeoutSeconds = 5
+    }
+    maxFilterLimitCount = 0
+    negentropy { enabled = false }
+    info {
+        extra = "{\"budabit\":{\"read_control\":{\"version\":2,\"mode\":\"members\",\"scope\":\"relay\",\"unfiltered_kinds\":[1,5,1984,30000,32222]}}}"
+    }
+}
 ```
 
-These dotted names are documentation notation: put assignments **inside the
-corresponding blocks** in `strfry.conf`, not literal dotted keys. Keep the packaged
-write plugin, an absolute DB path matching `STRFRY_POLICY_DB_FILE`, and raw
-event/request logging disabled. Change public descriptive metadata to avoid
-misleading readers. Do not put the private roster/branch in `info.extra`, names,
-logs or public metrics. The core hides branch extras unless explicitly enabled.
-
-Set Compose environment in a private environment file or shell:
+Set the environment used by both plugin processes:
 
 ```sh
-export BUDABIT_READ_CONTROL=members
-export BUDABIT_BRANCHES='32222:<owner>:<communityId>'
-export BUDABIT_AUTO_HOST_URL=
-export BUDABIT_DRY_RUN=0
-export BUDABIT_MODE=strict
-export BUDABIT_READ_SNAPSHOT_PATH=/var/lib/strfry/db/budabit-readers.json
-export BUDABIT_READ_MAX_PUBKEYS=20000
+BUDABIT_READ_CONTROL=members
+BUDABIT_BRANCHES='32222:<owner-hex-pubkey>:<64-hex-community-id>'
+BUDABIT_AUTO_HOST_URL=
+BUDABIT_DRY_RUN=0
+BUDABIT_READ_REFRESH_SECONDS=1
+BUDABIT_READ_MAX_AGE_SECONDS=10
+BUDABIT_READ_SCAN_TIMEOUT_SECONDS=5
+BUDABIT_READ_SCAN_MAX_BYTES=33554432
+BUDABIT_READ_MAX_PUBKEYS=20000
 ```
 
-`strict` is the recommended deployment preset, not a new reader-role rule.
-`BUDABIT_DISABLE_LOADER` must not be enabled. Never give a wrapper a different
-environment/config than preflight. Set `STRFRY_CONFIG_FILE` to the reviewed host
-config and `STRFRY_DATA_DIR` to the private DB directory. Do not confuse host paths
-with the container's `/etc/strfry.conf` and `/var/lib/strfry/db` paths.
+Do not disable the live loader. `STRFRY_CONFIG` and `STRFRY_POLICY_DB_FILE` must
+refer to the same configuration/database used by the core. The community address
+is configured in Python only, not duplicated in C++. Disallow raw request/event
+logging. Do not reuse public-mode NIP-11 branch lists on a private endpoint.
 
-Before opening ingress, run in the **same image, mounts and environment**:
+Remove old `readControl` blocks and snapshot-related environment variables.
+`readControl.enabled=true` is a startup error in the replacement. Old snapshots
+are ignored; retain/remove them only during an explicit stopped maintenance task.
+Do not point an old image at a new private configuration: use the reviewed new
+entrypoint and probe the actual running binary before opening ingress.
+
+## Expected delays and failure behavior
+
+- The plugin refreshes its own in-memory view; REQs are cheap lookups, not scans.
+- Refresh interval and view age are separate from the write loader's legacy
+  300-second reconciliation. No write-plugin acceptance grants readership.
+- There is no transaction fence across authority scans. Read access may reflect
+  an older or transient mixed view until a later pass converges.
+- Revocation delay includes observation/scan time, the next connection recheck
+  and bounded scheduling/IPC. Five-second rechecks are **not** a five-second
+  commit-to-revocation SLA. Slow/failing refresh eventually makes policy unavailable.
+- A stopped/malformed/timed-out plugin closes affected active service rather than
+  keeping old admission indefinitely. AUTH and signed-author repair writes remain
+  separate from read admission.
+- CLOSED restricted means authorization denial; CLOSED error means unavailable
+  policy. Interrupted history is incomplete. Disconnection cannot retract network
+  bytes already sent or copies retained by an admitted member.
+
+Use edge connection/IP/TLS limits. Native admission mode also bounds connections,
+pending decisions, aggregate inbound queue bytes (32 MiB), per-connection messages
+(100/s) and aggregate ingress messages (5000/s), plus configured subscriptions,
+frame size and outbound backlog. These are overload limits, not a DDoS guarantee.
+
+## Verification and health
+
+Before startup, with the actual environment and mounted config:
 
 ```sh
-docker compose -f deploy/budabit/compose.yaml run --rm --no-deps \
-  --entrypoint python3 relay /usr/local/lib/strfry/check-read-control.py --config-only
+python3 deploy/budabit/check-read-control.py --config /path/to/strfry.conf --config-only
 ```
 
-This check validates core/env agreement, enforcing branch/loader, executable
-plugin, AUTH age/URL, COUNT/NEG, DB/snapshot paths and bounds. It conservatively
-rejects config includes, duplicate keys/blocks and expressions rather than guessing
-their meaning. It does not generate a config. Both switches default off. The
-Compose entrypoint runs the pre-start check on relay startup; old images lacking
-this entrypoint cannot silently ignore the private preset.
+After startup, `--url http://127.0.0.1:7777/` also checks the serving NIP-11 facts.
+`read-policy.py --check-policy` independently checks a fresh local policy scan.
+Compose's conditional health combines storage/write/read checks and advertisement.
+These are **not** proof of the running read plugin's cache or authenticated access.
+There is no core-status/reader-snapshot artifact health contract anymore.
 
-Start with external ingress still closed. Confirm health and local NIP-11:
+Keep ingress closed while using controlled keys to verify:
 
-```sh
-docker compose -f deploy/budabit/compose.yaml exec relay \
-  python3 /usr/local/lib/strfry/check-read-control.py --url http://127.0.0.1:7777/
-docker compose -f deploy/budabit/compose.yaml exec relay \
-  /usr/local/lib/strfry/write-policy.py --check-read-policy
-```
+1. Anonymous REQ: AUTH + CLOSED auth-required; no EVENT/EOSE.
+2. Nonmember: AUTH OK true, then REQ CLOSED restricted and disconnection.
+3. Owner/member: complete expected retained history on appropriately scoped filters.
+4. Ban/removal with an already-live subscription: eventual CLOSED/disconnection
+   without sending another REQ; record actual elapsed time.
+5. Grant/regrant: reconnect, AUTH and retry after refresh; no signing/reconnect loop.
+6. Plugin failure: no successful new reads; existing reads stop within configured
+   recheck/deadline behavior. Test recovery with fresh decisions.
+7. COUNT/Negentropy remain disabled; independent DM participant protection still applies.
 
-The Compose health check performs storage/write-policy checks, config/NIP-11
-agreement, installed-core projection status and `--check-read-policy` only in members mode. The NIP-11 claim must be
-`limitation.auth_required: true` plus
-`budabit.read_control: {version: 1, mode: "members", scope: "relay"}`. Check it
-through the intended reverse-proxy path too; no redirect or public fallback.
-The current client additionally requires `read_control.unfiltered_kinds` to cover
-`[1,5,1984,30000,32222]` for complete text/authority intake. The core advertises only
-supported kinds without post-limit involved-key filtering under its active config.
-Default DM restrictions (4/1059) remain unchanged. Do not disable them to make a
-broad history query look complete: the client uses separate disjoint authority
-and text filters, each bounded by `min(200,max_limit)`. Unknown claims/limits or
-saturation keep it partial. Older private-capable cores lacking this optional
-completeness claim remain read-gated but the new client will not claim ready.
-Changing restricted-read settings or maxFilterLimit while privately serving
-invalidates the gate; restart and obtain fresh metadata/AUTH before reopening.
+The client invitation is `/c/<naddr>?read-access=members`; optional repeated `relay`
+query parameters override naddr hints. Private scopes never use public discovery,
+outboxes or newly discovered relay destinations. Signed members intent, validated
+capabilities and complete bounded authority intake are required for authoring.
+No public forms/join workflow or private Git/media/Blossom/widget parity is implied.
 
-Runtime health compares the Python artifact with the running core's installed
-epoch, exact pending/installed sequence and heartbeat. The core writes a protected
-local status at invalidation and every100ms; the checker verifies readiness,
-supervisor epoch, unexpired monotonic lease, status age under one second and Linux
-boot/PID/start-time identity. Run it as the relay user in the same PID/time namespace.
-Missing/rejected/pending/expired/replaced-core status fails. Pre-start `--config-only`
-does not require a status file. `--check-read-policy` alone remains artifact-only.
-This is sampled readiness, **not** an end-to-end privacy guarantee or a guarantee
-against a failure immediately after checking. Raw protocol probes remain required before opening
-ingress: anonymous REQ gets CLOSED with no EVENT/EOSE; outsider AUTH succeeds but
-REQ is restricted; member AUTH+REQ returns history; COUNT/NEG never return data.
-Use controlled keys and local fixtures, not live accounts for routine tests.
+## Independent DM and NIP-70 settings
 
-## Monitor and invite
+Kind4444 uses participant AUTH regardless of `readPolicy.plugin`, the optional
+restricted-kind list, or its involved-key toggle. Legacy kind4/1059 also remain
+protected. With AUTH disabled/unconfigured, DMs stay inaccessible, not public.
+Enable AUTH with the actual service URL to make them usable. Signed recipient tags
+govern participant access; this change does not validate or transform ciphertext.
+Malformed retained events are not made public: with no valid recipient, only the
+authenticated author can read them. Existing behavior treats any valid 32-byte
+`p` tag as a recipient, even if a historical event has more than one; no new
+single-recipient validation or rewrite of signed events is introduced here.
 
-- Snapshot: `budabit-readers.json`, atomic 0600, includes the private roster.
-- Status: `budabit-readers.status.json`, atomic 0600, counts/readiness/error but no
-  roster. It still includes private coordinates; do not expose it as a public URL.
-- Serving-core status: `<snapshotPath>.core-status.json`, atomic0600, epoch,
-  installed/pending revision, heartbeat, readiness and process/lease identity.
-  No roster or connection identities; still private, never a public status API.
-  Do not restore this file as evidence of a running process. Failed writes remove
-  it so health cannot reuse an old success. Nothing reads it to authorize clients.
-- A worker heartbeat advances once per second; a blocked rebuild cannot renew it.
-  The core validates epoch, exact pending sequence and a monotonic lease at final
-  sends. A gate timeout (default three seconds) closes rather than permits output.
-- On failure, retain private mode, diagnose locally, repair/restart and probe.
-  Never “fix health” by switching read control off or fabricating snapshots.
+`relay.nip70.enabled=false` is the new default. It ignores protected-tag author-auth
+semantics and NIP-70 embedded-repost rejection, leaves signed events unchanged,
+and omits NIP-70 from advertisement. Opt in explicitly to restore those semantics.
 
-Invite with `/c/<naddr>?read-access=members` using naddr relay hints, or repeated
-`relay=` query parameters (URL-encoded). Share privately. Budabit persists only
-coordinates/endpoints in session storage, obtains explicit authentication consent,
-and uses a real signer (90-second signing, 10-second AUTH ACK budgets). A pubkey-only
-identity cannot authenticate. Retry after a grant uses full original filters and
-the same authenticated connection; revoked connections authenticate again.
+## Build, maintenance and rollback
 
-The initial client provides private owner-definition bootstrap and plain-text
-posting through capability-checked definition relays. It does not mount the public
-community pages. Its archive limit is 200 events per relay: saturation/missing
-definition/failed relays are **incomplete**, not empty; do not treat that view as
-complete moderation authority. Git, media, Blossom, widgets and zaps are disabled.
-For larger deployments, provision an appropriately complete private-capable client
-before relying on client-side authoring/moderation workflows.
+Build the initialized reviewed local checkout with the allowlisted Docker context.
+Record both source revision and resulting image digest; a revision label does not
+prove an uncommitted checkout's contents. Native tests and Compose parsing are not
+container verification. The old public `2fc1b38` image is not a private rollback.
 
-## Maintenance and rollback
-
-**Exclusive writer:** while privately serving, only `RelayWriter` may change this
-DB. Built-in expiry goes through that writer. Never run `strfry import`, `delete`,
-`sync`, `stream`, `router`, `sweep.py`, external retention or a second relay writer
-against it. Removing a snapshot alone is **not** a maintenance fence: the live
-worker can recreate it. Stop the relay and close ingress first.
-
-1. Save the private-capable image digest, config and environment in protected backup
-   storage. `backup.sh` logical exports contain private history: apply private file
-   permissions/encryption/access rules and keep them off public Blossom/Git. Existing
-   read-only backup/export may run online only without invoking another writer.
-2. Stop the relay, verify process exit and disabled maintenance timers. Run the
-   explicitly approved import/restore/delete/retention offline. Retention excludes
-   5/1984/30000/32222 and other replaceables; source changes cannot recover previously
-   deleted evidence. Restore policy evidence before reopening.
-3. Restart **a tested private-capable image**, preserving both switches and branch.
-   Do not reuse snapshot freshness as authorization: the new core epoch requires a
-   fresh committed projection. Re-run health and anonymous/outsider/member probes.
-4. Reopen ingress only after successful probes. A failed upgrade may roll back to
-   the previous tested private-capable image/config, never the historical public
-   `2fc1b38`/`b80cda3` images. If no capable rollback exists, remain stopped.
-
-Disabling read control is a **disclosure operation**, not rollback. AUTH is not E2E
-encryption; operators and members can copy retained events. Enabling it cannot
-retract public history. External Git HTTP, Blossom, embeds and payment services
-require independent protection even if Nostr relay reads are private.
-
-## Isolated verification record
-
-Run from the repository root with an approved, unique temporary parent:
-
-```sh
-TMPDIR="$(mktemp -d "$HOME/.cache/opencode-v2/tmp/opencode/private-drill.XXXXXX")" \
-  node test/tests/budabitReadPolicyTest.js
-```
-
-The harness creates a fresh LMDB and controlled keys, validates preflight before
-startup and against the live snapshot/NIP-11, rejects env mismatches, exercises
-anonymous/outsider/member, owner bootstrap, live revocation/regrant, policy faults,
-offline import and backpressure, and restores the private preset after rejected
-configs with fresh-epoch access probes. This is a native configuration/rollback
-drill, **not a Docker image-switch test or live deployment**. Docker daemon access
-was unavailable during implementation verification; no image-build claim is made.
-The Python suite covers preset pass/fail, bounded artifact health and parser errors.
-
-Before merge/release, publish the server revision only with authorization and update
-Budabit's immutable conformance pin. The existing remote pin predates reader vectors;
-local vector agreement is not proof that a matching release is already published.
+Keep imports/restores/sweeps offline, verify retention of authority evidence, then
+restart and repeat the access probes. There is no commit barrier coordinating
+external database mutations. Disabling read policy reveals retained history and
+must never be used as a failure-recovery shortcut. Remain stopped if no tested
+private-capable replacement or rollback image is available. Publication, image
+promotion and live deployment require separate authorization.
