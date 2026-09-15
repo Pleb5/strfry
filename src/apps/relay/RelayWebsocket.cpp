@@ -61,8 +61,9 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
 
 
     auto supportedNips = [&]{
-        tao::json::value output = tao::json::value::array({ 1, 2, 4, 9, 11, 28, 40, 59, 70 });
+        tao::json::value output = tao::json::value::array({ 1, 2, 4, 9, 11, 28, 40, 59 });
 
+        if (cfg().relay__nip70__enabled) output.push_back(70);
         if (cfg().relay__auth__enabled && cfg().relay__auth__serviceUrl.size() > 0) output.push_back(42);
         if (cfg().relay__maxFilterLimitCount > 0) output.push_back(45);
         if (cfg().relay__negentropy__enabled) output.push_back(77);
@@ -75,6 +76,8 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
             auto parsed = tao::json::from_string(cfg().relay__info__nips);
             if (!parsed.is_array()) throw herr("not an array");
             output = parsed;
+            if (!cfg().relay__nip70__enabled)
+                std::erase_if(output.get_array(), [](const auto &nip) { return nip == 70; });
         } catch (std::exception &e) {
             LE << "Unable to parse config param relay.info.nips, using default: " << e.what();
         }

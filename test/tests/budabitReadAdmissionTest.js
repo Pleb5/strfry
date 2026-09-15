@@ -36,6 +36,7 @@ try {
   assert.equal(profile.limitation.auth_required,true);
   assert.deepEqual(profile.read_policy,{version:1,admission:"req",consistency:"eventual",recheck_seconds:1});
   assert.equal(profile.budabit.read_control.version,2);
+  assert(!profile.supported_nips.includes(70));
   restored.send(["REQ","stale",{kinds:[1],limit:0}]);
   await restored.waitFor(m=>m[0]==="EOSE" && m[1]==="stale");
   const stale = once(restored.ws,"close"), failedAt = Date.now();
