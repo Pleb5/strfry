@@ -207,6 +207,9 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                     }
                     return true;
                 });
+                // Shared precomputed trees contain every matching event. Use
+                // the participant-filtered memory path for any possible DM.
+                if (ReadRestrictor::mayContainRestricted(msg->sub.filterGroup)) treeId.reset();
 
                 queries.removeSub(connId, subId);
                 views.removeView(connId, subId);
@@ -273,6 +276,7 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                 queries.removeSub(msg->connId, msg->subId);
                 views.removeView(msg->connId, msg->subId);
             } else if (auto msg = std::get_if<MsgNegentropy::CloseConn>(&newMsg.msg)) {
+                connIdToAuthedPubkey.erase(msg->connId);
                 queries.closeConn(msg->connId);
                 views.closeConn(msg->connId);
             }

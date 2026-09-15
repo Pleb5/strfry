@@ -26,6 +26,21 @@ public:
     }
     static void init(){
         parseCommaSeparatedKinds(cfg().relay__auth__restrictedReadKinds, restrictedKinds_);
+        // Baseline DM privacy is not an optional community/read-policy setting.
+        restrictedKinds_.insert(4);
+        restrictedKinds_.insert(1059);
+        restrictedKinds_.insert(4444);
+    }
+
+    static bool participantOnly(uint64_t kind) { return kind == 4 || kind == 1059 || kind == 4444; }
+
+    static bool mayContainRestricted(const NostrFilterGroup &group) {
+        for (const auto &filter : group.filters) {
+            if (!filter.kinds) return true;
+            for (size_t i = 0; i < filter.kinds->size(); ++i)
+                if (restrictedKinds().contains(filter.kinds->at(i))) return true;
+        }
+        return false;
     }
 
     static flat_hash_set<uint64_t>& restrictedKinds() {
@@ -63,20 +78,20 @@ public:
         bool pubkeyIsNull = pubkey.isNull();
 
         for (const auto &f: fg.filters) {
-            if (!f.kinds) continue;
-            bool hasSomeRestrictedKind = false;
-            for (size_t i = 0; i < f.kinds->size(); ++i) {
+            bool hasSomeRestrictedKind = !f.kinds;
+            bool mandatory = !f.kinds;
+            for (size_t i = 0; f.kinds && i < f.kinds->size(); ++i) {
                 uint64_t kind = f.kinds->at(i);
+                mandatory |= participantOnly(kind);
                 if (restrictedKinds().contains(kind)) {
                     hasSomeRestrictedKind = true;
-                    break;
                 }
             }
             if (hasSomeRestrictedKind) {
                 if (pubkeyIsNull) {
                     return false;
                 }
-                if (!cfg().relay__auth__restrictReadToInvolvedPubkey) {
+                if (!mandatory && !cfg().relay__auth__restrictReadToInvolvedPubkey) {
                     continue;
                 }
                 bool authorScoped = f.authors && allPubkeysMatch(*f.authors, pubkey);
@@ -110,7 +125,7 @@ public:
             return false;
         }
 
-        if(!cfg().relay__auth__restrictReadToInvolvedPubkey) return true;
+        if(!participantOnly(packed.kind()) && !cfg().relay__auth__restrictReadToInvolvedPubkey) return true;
 
         bool involved = subscriberAuthedPubkey == packed.pubkey();
 

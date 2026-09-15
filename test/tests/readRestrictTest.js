@@ -204,7 +204,7 @@ function testNegentropyRestrictedFilterRequiresAuth({ wsUrl }) {
 
 // post auth
 
-async function testRestrictedFilterReturnsAllIfAuthenticatedAndInvolvementNotRequired({
+async function testLegacyDMParticipantReadWithOptionalRestrictionDisabled({
   wsUrl,
   client,
 }) {
@@ -247,7 +247,7 @@ async function testRestrictedFilterReturnsAllIfAuthenticatedAndInvolvementNotReq
     "restricted authenticated REQ should return restricted kind 4 events",
   );
   pass(
-    "testRestrictedFilterReturnsAllIfAuthenticatedAndInvolvementNotRequired",
+    "testLegacyDMParticipantReadWithOptionalRestrictionDisabled",
   );
 }
 
@@ -261,8 +261,8 @@ async function testRestrictedFilterCountAuthenticatedNotScoped({
     4_000,
   );
   expect(
-    count[0] === "COUNT",
-    "COUNT must be successful when authenticated and restrictReadToInvolvedPubkey is false",
+    count[0] === "CLOSED" && String(count[2]).includes("count-failed"),
+    "DM COUNT must remain participant scoped even when optional restrictions are disabled",
   );
   pass("testRestrictedFilterCountAuthenticatedNotScoped");
 }
@@ -338,7 +338,7 @@ async function main() {
       await testReqMonitorFiltersRestrictedLiveEvents({ wsUrl, client });
       testNegentropyMixedFilterBlocksRestrictedWithoutAuth({ wsUrl });
       testNegentropyRestrictedFilterRequiresAuth({ wsUrl });
-      await testRestrictedFilterReturnsAllIfAuthenticatedAndInvolvementNotRequired(
+      await testLegacyDMParticipantReadWithOptionalRestrictionDisabled(
         { wsUrl, client },
       );
       await testRestrictedFilterCountAuthenticatedNotScoped({ wsUrl, client });
