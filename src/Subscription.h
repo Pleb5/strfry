@@ -60,12 +60,14 @@ struct Subscription : NonCopyable {
     // State
 
     uint64_t latestEventId = MAX_U64;
+    uint64_t admissionId = 0; // asynchronous REQ lifecycle token, not a policy revision
 };
 
 
 struct ConnIdSubId {
     uint64_t connId;
     SubId subId;
+    uint64_t admissionId = 0;
 };
 
 using RecipientList = std::vector<ConnIdSubId>;

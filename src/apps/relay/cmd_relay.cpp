@@ -40,7 +40,16 @@ void cmd_relay(const std::vector<std::string> &subArgs) {
 }
 
 void RelayServer::run() {
-    readGate.configure(); // validate before starting any serving threads
+    readAdmission.configure(); // validate before starting any serving threads
+    readAdmission.onAdmit = [this](Subscription &&sub) {
+        auto connId = sub.connId;
+        tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::NewSub{std::move(sub)}});
+    };
+    readAdmission.onReject = [this](const ReadAdmission::Rejection &rejection) {
+        for (const auto &sub : rejection.subs)
+            sendToConn(rejection.connId, tao::json::to_string(tao::json::value::array({"CLOSED", sub, rejection.reason})));
+        terminateConn(rejection.connId);
+    };
     {
         sigset_t set;
         sigemptyset(&set);
@@ -71,6 +80,7 @@ void RelayServer::run() {
 
     tpWebsocket.init("Websocket", 1, [this](auto &thr){ runWebsocket(thr); });
     while (!websocketReady.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    readAdmission.start();
 
     cronThread = std::thread([this]{
         runCron();

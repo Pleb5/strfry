@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 
 #include "Bytes32.h"
 
@@ -23,6 +24,13 @@ struct AuthSession {
   std::array<char, kChallengeSize> challenge{};
   Bytes32 authed;
   AuthKeys keys;
+  std::chrono::steady_clock::time_point attemptWindow = std::chrono::steady_clock::now();
+  unsigned attempts = 0;
+  bool allowAttempt() {
+    auto now = std::chrono::steady_clock::now();
+    if (now - attemptWindow >= std::chrono::seconds(10)) { attemptWindow = now; attempts = 0; }
+    return ++attempts <= 16;
+  }
 
   AuthSession(std::string_view token) {
     if (token.size() != kChallengeSize)

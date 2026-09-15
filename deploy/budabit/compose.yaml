@@ -52,13 +52,13 @@ services:
       BUDABIT_REJECT_CENSORED_ADDRESSES: "${BUDABIT_REJECT_CENSORED_ADDRESSES:-0}"
       BUDABIT_RECONCILE_SECONDS: "${BUDABIT_RECONCILE_SECONDS:-300}"
       BUDABIT_STRFRY_BIN: /usr/local/bin/strfry
-      # Both the Python mode AND core relay.readControl.enabled must agree.
+      # Python members mode requires core relay.readPolicy.plugin to be configured.
       BUDABIT_READ_CONTROL: "${BUDABIT_READ_CONTROL:-off}"
-      BUDABIT_READ_SNAPSHOT_PATH: "${BUDABIT_READ_SNAPSHOT_PATH:-/var/lib/strfry/db/budabit-readers.json}"
       BUDABIT_READ_MAX_PUBKEYS: "${BUDABIT_READ_MAX_PUBKEYS:-20000}"
-      BUDABIT_READ_MAX_SNAPSHOT_BYTES: "${BUDABIT_READ_MAX_SNAPSHOT_BYTES:-2097152}"
       BUDABIT_READ_SCAN_MAX_BYTES: "${BUDABIT_READ_SCAN_MAX_BYTES:-33554432}"
-      BUDABIT_READ_SCAN_TIMEOUT_SECONDS: "${BUDABIT_READ_SCAN_TIMEOUT_SECONDS:-30}"
+      BUDABIT_READ_SCAN_TIMEOUT_SECONDS: "${BUDABIT_READ_SCAN_TIMEOUT_SECONDS:-5}"
+      BUDABIT_READ_REFRESH_SECONDS: "${BUDABIT_READ_REFRESH_SECONDS:-1}"
+      BUDABIT_READ_MAX_AGE_SECONDS: "${BUDABIT_READ_MAX_AGE_SECONDS:-10}"
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -81,7 +81,7 @@ services:
           && /usr/local/lib/strfry/write-policy.py --check-storage
           && /usr/local/lib/strfry/write-policy.py --check-policy
           && python3 /usr/local/lib/strfry/check-read-control.py --url http://127.0.0.1:7777/
-          && { [ "$${BUDABIT_READ_CONTROL}" != members ] || /usr/local/lib/strfry/write-policy.py --check-read-policy; }
+          && { [ "$${BUDABIT_READ_CONTROL}" != members ] || /usr/local/lib/strfry/read-policy.py --check-policy; }
       interval: 30s
       timeout: 20s
       retries: 3

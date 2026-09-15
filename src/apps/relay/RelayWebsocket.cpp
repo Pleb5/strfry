@@ -30,6 +30,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
         uint64_t connId;
         uint64_t connectedTimestamp;
         std::string ipAddr;
+        uint64_t messageSecond = 0, messages = 0;
         struct Stats {
             uint64_t bytesUp = 0;
             uint64_t bytesUpCompressed = 0;
@@ -53,12 +54,13 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
     uint64_t nextConnectionId = 1;
     bool gracefulShutdown = false;
     uint64_t serverStart = ::time(nullptr);
+    uint64_t ingressSecond = 0, ingressMessages = 0;
 
     std::string tempBuf;
     tempBuf.reserve(cfg().events__maxEventSize + MAX_SUBID_SIZE + 100);
 
 
-    auto supportedNips = []{
+    auto supportedNips = [&]{
         tao::json::value output = tao::json::value::array({ 1, 2, 4, 9, 11, 28, 40, 59, 70 });
 
         if (cfg().relay__auth__enabled && cfg().relay__auth__serviceUrl.size() > 0) output.push_back(42);
@@ -67,7 +69,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
 
         std::sort(output.get_array().begin(), output.get_array().end());
 
-        if (cfg().relay__info__nips.size() == 0 || cfg().relay__readControl__enabled) return output;
+        if (cfg().relay__info__nips.size() == 0 || readAdmission.enabled) return output;
 
         try {
             auto parsed = tao::json::from_string(cfg().relay__info__nips);
@@ -125,25 +127,15 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
                 }
             }
 
-            if (readGate.enabled) {
+            if (readAdmission.enabled) {
                 nip11["limitation"]["auth_required"] = true;
                 nip11["limitation"]["restricted_writes"] = true;
                 nip11.get_object().erase("negentropy");
-                // Do not merge arbitrary public-mode Budabit extras containing
-                // configured/enforced branch lists into a private advertisement.
-                nip11["budabit"] = tao::json::value({{"read_control", tao::json::value({
-                    {"version", 1}, {"mode", "members"}, {"scope", "relay"},
-                })}});
-                // Explicit completeness contract for authenticated readers:
-                // these supported kinds have no post-limit involved-key filter.
-                // Other retained kinds (notably DMs) keep their restrictions.
-                nip11["budabit"]["read_control"]["unfiltered_kinds"] = tao::json::empty_array;
-                for (uint64_t kind : {1, 5, 1984, 30000, 32222}) {
-                    if (!cfg().relay__auth__restrictReadToInvolvedPubkey || !ReadRestrictor::restrictedKinds().contains(kind))
-                        nip11["budabit"]["read_control"]["unfiltered_kinds"].push_back(kind);
-                }
-                if (cfg().relay__readControl__advertiseBranch)
-                    nip11["budabit"]["read_control"]["branch_address"] = readGate.branch;
+                // Policy-specific declarations belong to the operator's info.extra.
+                nip11["read_policy"] = tao::json::value({
+                    {"version", 1}, {"admission", "req"}, {"consistency", "eventual"},
+                    {"recheck_seconds", readAdmission.interval},
+                });
             }
             rendered = preGenerateHttpResponse("application/json", tao::json::to_string(nip11));
             ver = cfg().version();
@@ -268,7 +260,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
         std::string url = req.getUrl().toString();
 
         if (url == "/metrics") {
-            auto metrics = readGate.enabled ? std::string("# Private relay metrics are not exposed on the public endpoint\n") : PrometheusMetrics::getInstance().render();
+            auto metrics = readAdmission.enabled ? std::string("# Private relay metrics are not exposed on the public endpoint\n") : PrometheusMetrics::getInstance().render();
             auto response = preGenerateHttpResponse("text/plain; version=0.0.4", metrics);
             res->write(response.data(), response.size());
         } else if (url == "/.well-known/nodeinfo") {
@@ -304,8 +296,8 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
 
         ws->setUserData((void*)c);
         connIdToConnection.emplace(connId, c);
-        readGate.connect(connId);
-        if (readGate.enabled) tpIngester.dispatch(connId, MsgIngester{MsgIngester::NewConn{connId}});
+        bool admittedConnection = readAdmission.connect(connId);
+        if (readAdmission.enabled && admittedConnection) tpIngester.dispatch(connId, MsgIngester{MsgIngester::NewConn{connId}});
 
         bool compEnabled, compSlidingWindow;
         ws->getCompressionState(compEnabled, compSlidingWindow);
@@ -315,6 +307,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
         ;
 
         PrometheusMetrics::getInstance().activeConnections.inc();
+        if (!admittedConnection) { ws->terminate(); return; }
 
         if (cfg().relay__enableTcpKeepalive) {
             int optval = 1;
@@ -327,7 +320,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
     hubGroup->onDisconnection([&](uWS::WebSocket<uWS::SERVER> *ws, int code, char *message, size_t length) {
         auto *c = (Connection*)ws->getUserData();
         uint64_t connId = c->connId;
-        readGate.disconnect(connId);
+        readAdmission.disconnect(connId);
 
         auto upComp = renderPercent(1.0 - (double)c->stats.bytesUpCompressed / c->stats.bytesUp);
         auto downComp = renderPercent(1.0 - (double)c->stats.bytesDownCompressed / c->stats.bytesDown);
@@ -358,6 +351,22 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
     hubGroup->onMessage2([&](uWS::WebSocket<uWS::SERVER> *ws, char *message, size_t length, uWS::OpCode opCode, size_t compressedSize) {
         auto &c = *(Connection*)ws->getUserData();
 
+        if (readAdmission.enabled) {
+            // Cheap pre-JSON bounds. Edge/IP limits remain necessary for
+            // distributed handshake/bandwidth attacks.
+            auto now = hoytech::curr_time_s();
+            if (c.messageSecond != now) { c.messageSecond = now; c.messages = 0; }
+            if (ingressSecond != now) { ingressSecond = now; ingressMessages = 0; }
+            if (++c.messages > 100 || ++ingressMessages > 5000) { ws->terminate(); return; }
+            auto count = pendingIncomingMessages.fetch_add(1) + 1;
+            auto bytes = pendingIncomingBytes.fetch_add(length) + length;
+            if (count > readAdmission.maxPending || bytes > 32 * 1024 * 1024) {
+                pendingIncomingMessages.fetch_sub(1);
+                pendingIncomingBytes.fetch_sub(length);
+                ws->terminate(); return;
+            }
+        }
+
         c.stats.bytesDown += length;
         c.stats.bytesDownCompressed += compressedSize;
 
@@ -369,13 +378,12 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
         auto newMsgs = thr.inbox.pop_all_no_wait();
 
         auto doSend = [&](uint64_t connId, std::string_view payload, uWS::OpCode opCode, bool privateData = false){
-            std::unique_lock<std::recursive_mutex> authorization(readGate.mutex, std::defer_lock);
-            if (readGate.enabled) authorization.lock();
             auto it = connIdToConnection.find(connId);
             if (it == connIdToConnection.end()) return;
             auto &c = *it->second;
-            if (readGate.enabled && privateData && readGate.accessLocked(connId) != ReadGate::Access::Allowed) {
-                c.websocket->terminate();
+            if (privateData && readAdmission.closed(connId)) {
+                // Discard queued data, but leave the queued CLOSED/Terminate
+                // control messages able to report the reason before teardown.
                 return;
             }
 
@@ -416,7 +424,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
             // drains the queued sends with cancellation callbacks, so no queue
             // entries leak. c is dangling after terminate(), so we must return.
             const uint64_t maxPending = cfg().relay__maxPendingOutboundBytes;
-            if ((readGate.enabled && c.stats.pendingOutbound > 0) || (maxPending > 0 && c.stats.pendingOutbound > maxPending)) {
+            if (maxPending > 0 && c.stats.pendingOutbound > maxPending) {
                 LW << "[" << c.connId << "] Slow client: pendingOutbound "
                    << renderSize(c.stats.pendingOutbound)
                    << " exceeds relay.maxPendingOutboundBytes "
@@ -429,6 +437,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
 
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgWebsocket::Send>(&newMsg.msg)) {
+                if (msg->admissionId && !readAdmission.current(msg->connId, msg->subId, msg->admissionId)) continue;
                 doSend(msg->connId, msg->payload, uWS::OpCode::TEXT, msg->privateData);
             } else if (auto msg = std::get_if<MsgWebsocket::SendBinary>(&newMsg.msg)) {
                 doSend(msg->connId, msg->payload, uWS::OpCode::BINARY, true);
@@ -440,6 +449,7 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
                 tempBuf += "]";
 
                 for (auto &item : msg->list) {
+                    if (item.admissionId && !readAdmission.current(item.connId, item.subId.sv(), item.admissionId)) continue;
                     PROM_INC_RELAY_MSG("EVENT");
                     auto subIdSv = item.subId.sv();
                     auto *p = tempBuf.data() + MAX_SUBID_SIZE - subIdSv.size();

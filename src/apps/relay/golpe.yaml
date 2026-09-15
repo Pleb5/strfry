@@ -1,31 +1,27 @@
 config:
   - name: relay__readControl__enabled
-    desc: "Require committed Budabit member authorization for all reads (restart required)"
+    desc: "Removed snapshot mode: true refuses startup; migrate explicitly to readPolicy.plugin"
     default: false
     noReload: true
-  - name: relay__readControl__branchAddress
-    desc: "Exactly one pinned 32222:owner:communityId for this private database"
+  - name: relay__readPolicy__plugin
+    desc: "Persistent JSONL REQ admission plugin; empty disables admission (restart required)"
     default: ""
     noReload: true
-  - name: relay__readControl__snapshotPath
-    desc: "Absolute path to the private Python reader snapshot JSON"
-    default: ""
+  - name: relay__readPolicy__timeoutSeconds
+    desc: "Total admission queue and RPC deadline in seconds"
+    default: 2
     noReload: true
-  - name: relay__readControl__maxSnapshotBytes
-    desc: "Maximum reader snapshot size; never truncate an allowlist"
-    default: 2097152
+  - name: relay__readPolicy__recheckSeconds
+    desc: "Recheck active connections through the plugin at this interval"
+    default: 5
     noReload: true
-  - name: relay__readControl__gateTimeoutSeconds
-    desc: "Bound on unavailable-policy private connections and idle snapshot liveness"
-    default: 3
+  - name: relay__readPolicy__maxPending
+    desc: "Maximum queued REQ admission decisions"
+    default: 1024
     noReload: true
-  - name: relay__readControl__proactiveChallenge
-    desc: "Send NIP-42 challenge on private relay connection"
-    default: true
-    noReload: true
-  - name: relay__readControl__advertiseBranch
-    desc: "Explicitly disclose the pinned private branch in NIP-11"
-    default: false
+  - name: relay__readPolicy__maxConnections
+    desc: "Maximum connections when read admission is enabled"
+    default: 4096
     noReload: true
   - name: relay__bind
     desc: "Interface to listen on. Use 0.0.0.0 to listen on all interfaces"
