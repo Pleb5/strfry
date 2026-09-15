@@ -28,7 +28,7 @@ COPY Makefile golpe.yaml ./
 COPY src ./src
 COPY golpe ./golpe
 COPY external ./external
-RUN test -f src/apps/relay/ReadGate.h \
+RUN test -f src/apps/relay/ReadAdmission.h \
     && test -f golpe/external/hoytech-cpp/README.md \
     && make -j2
 
@@ -54,13 +54,14 @@ RUN apk add --no-cache \
 
 COPY --from=build /build/strfry /usr/local/bin/strfry
 COPY deploy/budabit/write-policy.py /usr/local/lib/strfry/write-policy.py
+COPY deploy/budabit/read-policy.py /usr/local/lib/strfry/read-policy.py
 COPY deploy/budabit/audit.py /usr/local/lib/strfry/audit.py
 COPY deploy/budabit/check-read-control.py /usr/local/lib/strfry/check-read-control.py
 COPY deploy/budabit/start-relay.sh /usr/local/lib/strfry/start-relay.sh
 COPY deploy/budabit/policy /usr/local/lib/strfry/policy
 
 RUN chmod 0555 /usr/local/bin/strfry /usr/local/lib/strfry/write-policy.py /usr/local/lib/strfry/audit.py \
-    /usr/local/lib/strfry/check-read-control.py /usr/local/lib/strfry/start-relay.sh \
+    /usr/local/lib/strfry/check-read-control.py /usr/local/lib/strfry/start-relay.sh /usr/local/lib/strfry/read-policy.py \
     && find /usr/local/lib/strfry/policy -type d -exec chmod 0555 {} + \
     && find /usr/local/lib/strfry/policy -type f -exec chmod 0444 {} + \
     && rm -rf /usr/local/lib/strfry/policy/__pycache__ /usr/local/lib/strfry/policy/budabit/__pycache__

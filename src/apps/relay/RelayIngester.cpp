@@ -21,6 +21,11 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
 
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgIngester::ClientMessage>(&newMsg.msg)) {
+                if (readAdmission.enabled) {
+                    pendingIncomingMessages.fetch_sub(1);
+                    pendingIncomingBytes.fetch_sub(msg->payload.size());
+                }
+                if (readAdmission.closed(msg->connId)) continue;
                 try {
                     if (msg->payload.starts_with('[')) {
                         auto payload = tao::json::from_string(msg->payload);
@@ -77,7 +82,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                             }
                         } else if (cmd == "NEG-OPEN" || cmd == "NEG-MSG" || cmd == "NEG-CLOSE") {
                             PROM_INC_CLIENT_MSG(cmd);
-                            if (readGate.enabled) {
+                            if (readAdmission.enabled) {
                                 sendToConn(msg->connId, tao::json::to_string(tao::json::value::array({
                                     "NEG-ERR", jsonGetString(arr[1], "invalid NEG id"), "blocked: Negentropy disabled on private relay"
                                 })));
@@ -103,7 +108,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                     sendNoticeError(msg->connId, std::string("bad msg: ") + e.what());
                 }
             } else if (auto msg = std::get_if<MsgIngester::NewConn>(&newMsg.msg)) {
-                if (readGate.enabled && cfg().relay__readControl__proactiveChallenge)
+                if (readAdmission.enabled)
                     sendAuthChallenge(msg->connId, ensureChallenge(rsctx, msg->connId));
             } else if (auto msg = std::get_if<MsgIngester::CloseConn>(&newMsg.msg)) {
                 auto connId = msg->connId;
@@ -127,7 +132,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
 
 void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, uint64_t connId, std::string ipAddr, const tao::json::value &origJson, std::vector<MsgWriter> &output) {
     std::string packedStr, jsonStr;
-    if (readGate.enabled) {
+    if (readAdmission.enabled) {
         auto it = rsctx.connIdToAuthSession.find(connId);
         if (it == rsctx.connIdToAuthSession.end() || !it->second.isAuthed()) {
             sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
@@ -141,7 +146,7 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
     PackedEventView packed(packedStr);
     if (packed.kind() == 22242) throw herr("kind 22242 is only accepted via AUTH");
     Bytes32 authedPubkey;
-    if (readGate.enabled) authedPubkey = rsctx.connIdToAuthSession.at(connId).authed;
+    if (readAdmission.enabled) authedPubkey = rsctx.connIdToAuthSession.at(connId).authed;
 
     {
         // discard reposts that embed protected events
@@ -231,18 +236,17 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
 void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint64_t connId, const tao::json::value &arr, bool countOnly, std::string &outSubIdStr) {
     if (arr.get_array().size() < 2 + 1) throw herr("arr too small");
     outSubIdStr = jsonGetString(arr[1], "subscription id was not a string");
-    if (readGate.enabled) {
-        auto access = readGate.access(connId);
-        if (access != ReadGate::Access::Allowed) {
-            std::string reason;
-            if (access == ReadGate::Access::Unauthenticated) {
-                sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
-                reason = "auth-required: authenticate to read this relay";
-            } else if (access == ReadGate::Access::Unavailable) {
-                reason = "error: community read policy temporarily unavailable";
-            } else reason = "restricted: community membership required";
-            sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, reason})));
-            if (access == ReadGate::Access::Closed) terminateConn(connId);
+    if (readAdmission.enabled) {
+        auto it = rsctx.connIdToAuthSession.find(connId);
+        if (it == rsctx.connIdToAuthSession.end() || !it->second.isAuthed()) {
+            sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({
+                "CLOSED", outSubIdStr, "auth-required: authenticate to read this relay"})));
+            return;
+        }
+        if (countOnly) {
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({
+                "CLOSED", outSubIdStr, "blocked: COUNT disabled with read admission"})));
             return;
         }
     }
@@ -302,11 +306,15 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
 
     Subscription sub(connId, outSubIdStr, std::move(filterGroup), countOnly);
 
-    tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::NewSub{std::move(sub)}});
+    if (readAdmission.enabled) {
+        tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::RemoveSub{connId, sub.subId}});
+        readAdmission.request(std::move(sub));
+    } else tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::NewSub{std::move(sub)}});
 }
 
 void RelayServer::ingesterProcessClose(lmdb::txn &txn, uint64_t connId, const tao::json::value &arr) {
     if (arr.get_array().size() != 2) throw herr("arr too small/big");
+    readAdmission.cancel(connId, jsonGetString(arr[1], "CLOSE subscription id was not a string"));
 
     tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::RemoveSub{connId, SubId(jsonGetString(arr[1], "CLOSE subscription id was not a string"))}});
 }
@@ -325,6 +333,9 @@ static std::string normalizeRelayUrl(std::string_view url) {
 void RelayServer::ingesterProcessAuth(RelayServerCtx &rsctx, uint64_t connId, const tao::json::value &eventJson) {
     if (!cfg().relay__auth__enabled) throw herr("AUTH disabled");
     if (cfg().relay__auth__serviceUrl.empty()) throw herr("relay needs serviceUrl to be configured before AUTH can work");
+    auto session = rsctx.connIdToAuthSession.find(connId);
+    if (session == rsctx.connIdToAuthSession.end()) throw herr("no auth challenge for connection");
+    if (!session->second.allowAttempt()) throw herr("rate-limited: too many AUTH attempts");
 
     std::string packedStr, jsonStr;
     // Human/bunker signing can take longer than the ordinary ephemeral cutoff.
@@ -369,10 +380,10 @@ void RelayServer::ingesterProcessAuth(RelayServerCtx &rsctx, uint64_t connId, co
     // set the connection as authenticated with this pubkey
     bool previouslyAuthed = as.isAuthed();
     as.markAuthed(packed.pubkey());
-    readGate.authenticate(connId, packed.pubkey());
     tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::SetAuth{connId, packed.pubkey()}});
     tpReqMonitor.dispatch(connId, MsgReqMonitor{MsgReqMonitor::SetAuth{connId, packed.pubkey()}});
     tpNegentropy.dispatch(connId, MsgNegentropy{MsgNegentropy::SetAuth{connId, packed.pubkey()}});
+    readAdmission.authenticate(connId, packed.pubkey());
     PrometheusMetrics::getInstance().authSuccessTotal.inc();
     if (!previouslyAuthed) PrometheusMetrics::getInstance().authenticatedConnections.inc();
 

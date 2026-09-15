@@ -74,8 +74,6 @@ class BudabitWriteControl(Stage):
         outcome = request.annotations.get("budabit")
         if outcome is None or not outcome.authority:
             return
-        if self.config.read_control == "members":
-            request.annotations["policyRelevant"] = True
         if outcome.reason == "auto_host":
             address = P.get_addressable_address(request.event)
             branch = self.state.add_branch(address, auto=True)

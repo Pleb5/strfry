@@ -31,18 +31,16 @@ void RelayServer::runReqMonitor(ThreadPool<MsgReqMonitor>::Thread &thr) {
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgReqMonitor::NewSub>(&newMsg.msg)) {
                 auto connId = msg->sub.connId;
-                if (readGate.enabled && readGate.access(connId) != ReadGate::Access::Allowed) {
-                    terminateConn(connId);
-                    continue;
-                }
+                if (!readAdmission.current(msg->sub)) continue;
                 auto it = connIdToAuthedPubkey.find(connId);
                 auto connAuthedPubkey = it == connIdToAuthedPubkey.end() ? std::vector<Bytes32>{} : it->second.values;
 
                 env.foreach_Event(txn, [&](auto &ev){
+                    if (!readAdmission.current(msg->sub)) return false;
                     PackedEventView packed(ev.buf);
                     if (msg->sub.filterGroup.doesMatch(packed)) {
                         if (ReadRestrictor::shouldSendToSubscriber(packed, connAuthedPubkey)) {
-                            sendEvent(connId, msg->sub.subId, getEventJson(txn, decomp, ev.primaryKeyId));
+                            sendEvent(connId, msg->sub.subId, getEventJson(txn, decomp, ev.primaryKeyId), msg->sub.admissionId);
                         }
                     }
 
@@ -50,6 +48,7 @@ void RelayServer::runReqMonitor(ThreadPool<MsgReqMonitor>::Thread &thr) {
                 }, false, msg->sub.latestEventId + 1);
 
                 msg->sub.latestEventId = latestEventId;
+                if (!readAdmission.current(msg->sub)) continue;
 
                 if (!monitors.addSub(txn, std::move(msg->sub), latestEventId)) {
                     sendNoticeError(connId, std::string("too many concurrent REQs"));
@@ -62,9 +61,6 @@ void RelayServer::runReqMonitor(ThreadPool<MsgReqMonitor>::Thread &thr) {
                 connIdToAuthedPubkey.erase(msg->connId);
                 monitors.closeConn(msg->connId);
             } else if (std::get_if<MsgReqMonitor::DBChange>(&newMsg.msg)) {
-                // Do not scan OR advance currEventId while gated. The private
-                // timer reschedules catch-up after install even if inotify coalesces.
-                if (!readGate.available()) continue;
                 env.foreach_Event(txn, [&](auto &ev){
                     monitors.process(txn, ev, [&](RecipientList &&recipients, uint64_t levId){
                         PackedEventView packed(ev.buf);

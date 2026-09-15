@@ -13,8 +13,6 @@ Usage:
     write-policy.py                  # plugin mode (JSONL on stdin/stdout)
     write-policy.py --check-storage  # exit 1 when the storage guard rejects
     write-policy.py --check-policy   # load/check a fresh snapshot, not live ingestion readiness
-    write-policy.py --check-read-policy [EPOCH SEQ]
-                                     # inspect a local snapshot, not proof of live C++ enforcement
     write-policy.py --status         # print branch state as JSON
     write-policy.py --nip11-extra    # print the relay.info.extra JSON advertising enforcement
     write-policy.py --replay FILE [lmdb+export|export]
@@ -34,7 +32,6 @@ from policy.budabit.config import BudabitConfig  # noqa: E402
 from policy.budabit.metrics import Metrics  # noqa: E402
 from policy.budabit import rules  # noqa: E402
 from policy.budabit.stage import BudabitWriteControl  # noqa: E402
-from policy.budabit.readers import ReadProjection, CONTROL_TYPES, check_read_snapshot  # noqa: E402
 from policy.pipeline import Pipeline, Request  # noqa: E402
 from policy.ratelimit import RateLimiter  # noqa: E402
 from policy.storage import StorageGuard  # noqa: E402
@@ -56,24 +53,11 @@ class WritePolicy:
         )
         self.ratelimit = RateLimiter(env, self.clock)
         self.pipeline = Pipeline([self.storage, self.budabit, self.ratelimit], self.clock)
-        self.readers = None
-        if self.budabit.config.read_control == "members":
-            self.readers = ReadProjection(self.budabit.config, self.metrics, auto_start=start_loader)
 
     def handle(self, request):
-        if isinstance(request, dict) and request.get("type") in CONTROL_TYPES:
-            if self.readers is not None:
-                try:
-                    self.readers.control(request)
-                except Exception:
-                    self.readers.fail_control()
-                    self.metrics.log("reader_control_failed")
-            return None  # controls NEVER produce a JSONL write response
         return self.pipeline.handle(request)
 
     def stop(self):
-        if self.readers is not None:
-            self.readers.stop()
         if self.budabit.loader is not None:
             self.budabit.loader.stop()
 
@@ -93,8 +77,6 @@ def serve(policy):
             response = policy.handle(request)
         except Exception as error:  # noqa: BLE001 - never let the plugin die
             print(f"policy request failed: {type(error).__name__}", file=sys.stderr, flush=True)
-            if isinstance(request, dict) and request.get("type") in CONTROL_TYPES:
-                continue
             event_id = ""
             try:
                 event_id = (request or {}).get("event", {}).get("id", "")
@@ -174,17 +156,6 @@ def replay(policy, path, authority="lmdb+export"):
 
 def main(argv):
     args = argv[1:]
-
-    if args and args[0] == "--check-read-policy" and len(args) in (1, 3):
-        config = BudabitConfig.from_env(os.environ)
-        ok, message = check_read_snapshot(
-            config, expected_epoch=args[1] if len(args) == 3 else None,
-            expected_seq=int(args[2]) if len(args) == 3 else None,
-        )
-        if not ok:
-            print(message, file=sys.stderr)
-            raise SystemExit(1)
-        return
 
     if args == ["--check-storage"]:
         policy = WritePolicy(start_loader=False)

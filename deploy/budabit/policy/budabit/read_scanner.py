@@ -1,4 +1,4 @@
-"""Strict, aggregate-bounded scanner for a single committed read rebuild.
+"""Strict, aggregate-bounded scanner for one read-policy cache refresh.
 
 The existing write loader intentionally keeps its legacy scanner behavior.
 Private reads cannot silently skip malformed JSON or accumulate unbounded scan

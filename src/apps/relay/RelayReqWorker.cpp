@@ -10,10 +10,7 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
 
     queries.onEvent = [&](lmdb::txn &txn, const auto &sub, uint64_t levId, std::string_view eventPayload){
         if (sub.countOnly) return;
-        if (readGate.enabled && readGate.access(sub.connId) != ReadGate::Access::Allowed) {
-            terminateConn(sub.connId);
-            return;
-        }
+        if (!readAdmission.current(sub)) return; // cancelled/replaced REQ, not a membership check
         auto it = connIdToAuthedPubkey.find(sub.connId);
         auto ev = lookupEventByLevId(txn, levId);
         PackedEventView packed(ev.buf);
@@ -22,10 +19,11 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
             return; 
         }
         
-        sendEvent(sub.connId, sub.subId, decodeEventPayload(txn, decomp, eventPayload, nullptr, nullptr));
+        sendEvent(sub.connId, sub.subId, decodeEventPayload(txn, decomp, eventPayload, nullptr, nullptr), sub.admissionId);
     };
 
     queries.onComplete = [&](lmdb::txn &, Subscription &sub, uint64_t total){
+        if (!readAdmission.current(sub)) return;
         if (sub.countOnly) {
             bool limited = false;
 
@@ -43,7 +41,7 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
             sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "COUNT", sub.subId.str(), countBody })), true);
         } else {
             PROM_INC_RELAY_MSG("EOSE");
-            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "EOSE", sub.subId.str() })), true);
+            sendToConn(sub.connId, tao::json::to_string(tao::json::value::array({ "EOSE", sub.subId.str() })), true, sub.subId.str(), sub.admissionId);
             tpReqMonitor.dispatch(sub.connId, MsgReqMonitor{MsgReqMonitor::NewSub{std::move(sub)}});
         }
     };
@@ -56,10 +54,7 @@ void RelayServer::runReqWorker(ThreadPool<MsgReqWorker>::Thread &thr) {
         for (auto &newMsg : newMsgs) {
             if (auto msg = std::get_if<MsgReqWorker::NewSub>(&newMsg.msg)) {
                 auto connId = msg->sub.connId;
-                if (readGate.enabled && readGate.access(connId) != ReadGate::Access::Allowed) {
-                    terminateConn(connId);
-                    continue;
-                }
+                if (!readAdmission.current(msg->sub)) continue;
 
                 if (!queries.addSub(txn, std::move(msg->sub))) {
                     sendNoticeError(connId, std::string("too many concurrent REQs"));

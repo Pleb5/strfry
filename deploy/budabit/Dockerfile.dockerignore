@@ -13,6 +13,7 @@ deploy/*
 deploy/budabit/*
 !deploy/budabit/Dockerfile
 !deploy/budabit/write-policy.py
+!deploy/budabit/read-policy.py
 !deploy/budabit/audit.py
 !deploy/budabit/check-read-control.py
 !deploy/budabit/start-relay.sh

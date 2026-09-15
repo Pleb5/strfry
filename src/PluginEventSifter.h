@@ -45,7 +45,6 @@ struct PluginEventSifter {
         hoytech::StreamWriter streamWriter;
         std::string currPluginCmd;
         struct timespec lastModTime;
-        bool privateProcessGroup = false;
 
         RunningPlugin(pid_t pid, int rfd, int wfd, std::string currPluginCmd) : pid(pid), streamReader(rfd), streamWriter(wfd), currPluginCmd(currPluginCmd) {
             streamReader.setMaxRecordSize(8192);
@@ -58,27 +57,22 @@ struct PluginEventSifter {
         }
 
         ~RunningPlugin() {
-            // A stopped or uncooperative private policy must not deadlock its
-            // writer during restart. Kill its process group, including scans.
-            ::kill(privateProcessGroup ? -pid : pid, privateProcessGroup ? SIGKILL : SIGTERM);
-            ::waitpid(pid, nullptr, 0);
+            // Bound shutdown of the plugin and any child scans.
+            ::kill(-pid, SIGKILL);
+            while (::waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
         }
     };
 
     std::unique_ptr<RunningPlugin> running; 
-    bool privateMode = false;
-    bool policyRelevant = false;
-    std::function<void()> onStart, onStop;
 
     void stop() {
-        if (onStop) onStop();
         running.reset();
     }
 
     void prepare(const std::string &pluginCmd) {
         if (running) {
-            int status;
-            if (privateMode && waitpid(running->pid, &status, WNOHANG) == running->pid) stop();
+            siginfo_t status{};
+            if (::waitid(P_PID, running->pid, &status, WEXITED | WNOHANG | WNOWAIT) != 0 || status.si_pid) stop();
         }
         if (running) {
             if (pluginCmd != running->currPluginCmd) stop();
@@ -90,17 +84,10 @@ struct PluginEventSifter {
         }
         if (!running) {
             setupPlugin(pluginCmd);
-            if (onStart) onStart();
         }
     }
 
-    void sendControl(const tao::json::value &message) {
-        if (!running) throw herr("policy process unavailable");
-        running->streamWriter.write(tao::json::to_string(message) + "\n", 1000);
-    }
-
     PluginEventSifterResult acceptEvent(const std::string &pluginCmd, const tao::json::value &evJson, EventSourceType sourceType, std::string_view sourceInfo, const Bytes32 &authed, std::string &okMsg) {
-        policyRelevant = false;
         if (pluginCmd.size() == 0) {
             running.reset();
             return PluginEventSifterResult::Accept;
@@ -142,9 +129,9 @@ struct PluginEventSifter {
                 try {
                     response = tao::json::from_string(line);
                 } catch (std::exception &e) {
-                    if (privateMode) throw herr("invalid private policy response");
-                    LW << "Got unparseable line from write policy plugin: " << line;
-                    continue;
+                    // Do not log private payloads or let invalid output reset
+                    // the timeout forever.
+                    throw herr("invalid write policy response");
                 }
 
                 if (response.at("id").get_string() != request.at("event").at("id").get_string()) throw herr("id mismatch");
@@ -155,13 +142,12 @@ struct PluginEventSifter {
             okMsg = response.optional<std::string>("msg").value_or("");
 
             auto action = response.at("action").get_string();
-            if (privateMode && action == "accept") policyRelevant = response.optional<bool>("policyRelevant").value_or(false);
             if (action == "accept") return PluginEventSifterResult::Accept;
             else if (action == "reject") return PluginEventSifterResult::Reject;
             else if (action == "shadowReject") return PluginEventSifterResult::ShadowReject;
             else throw herr("unknown action: ", action);
         } catch (std::exception &e) {
-            LE << "Plugin error: " << (privateMode ? "private policy unavailable" : e.what());
+            LE << "Write policy unavailable";
             stop();
             okMsg = "error: internal error";
             return PluginEventSifterResult::Reject;
@@ -218,16 +204,13 @@ struct PluginEventSifter {
 
         posix_spawnattr_t attributes;
         posix_spawnattr_init(&attributes);
-        if (privateMode) {
-            posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
-            posix_spawnattr_setpgroup(&attributes, 0);
-        }
+        posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+        posix_spawnattr_setpgroup(&attributes, 0);
         auto ret = posix_spawnp(&pid, "sh", &file_actions, &attributes, (char* const*)(&argv[0]), environ);
         posix_spawnattr_destroy(&attributes);
         posix_spawn_file_actions_destroy(&file_actions);
         if (ret) throw herr("posix_spawn failed to invoke '", pluginCmd, "': ", strerror(errno));
 
         running = make_unique<RunningPlugin>(pid, inPipe.extractFd(0), outPipe.extractFd(1), pluginCmd);
-        running->privateProcessGroup = privateMode;
     }
 };

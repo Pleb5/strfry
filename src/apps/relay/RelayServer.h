@@ -21,7 +21,7 @@
 #include "Decompressor.h"
 #include "PrometheusMetrics.h"
 #include "AuthSession.h"
-#include "ReadGate.h"
+#include "ReadAdmission.h"
 
 
 
@@ -31,6 +31,8 @@ struct MsgWebsocket : NonCopyable {
         uint64_t connId;
         std::string payload;
         bool privateData = false;
+        std::string subId = "";
+        uint64_t admissionId = 0;
     };
 
     struct SendBinary {
@@ -82,9 +84,7 @@ struct MsgWriter : NonCopyable {
         uint64_t connId;
     };
 
-    struct Tick {};
-    struct Expire { std::vector<uint64_t> levIds; };
-    using Var = std::variant<AddEvent, CloseConn, Tick, Expire>;
+    using Var = std::variant<AddEvent, CloseConn>;
     Var msg;
     MsgWriter(Var &&msg_) : msg(std::move(msg_)) {}
 };
@@ -180,9 +180,10 @@ struct RelayServerCtx {
 };
 
 struct RelayServer {
-    ReadGate readGate;
+    ReadAdmission readAdmission;
     uS::Async *hubTrigger = nullptr;
     std::atomic<bool> websocketReady{false};
+    std::atomic<uint64_t> pendingIncomingMessages{0}, pendingIncomingBytes{0};
 
     // Thread Pools
 
@@ -222,13 +223,13 @@ struct RelayServer {
 
     // Utils (can be called by any thread)
 
-    void sendToConn(uint64_t connId, std::string &&payload, bool privateData = false) {
-        tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Send{connId, std::move(payload), privateData}});
+    void sendToConn(uint64_t connId, std::string &&payload, bool privateData = false, std::string subId = "", uint64_t admissionId = 0) {
+        tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Send{connId, std::move(payload), privateData, std::move(subId), admissionId}});
         hubTrigger->send();
     }
 
     void terminateConn(uint64_t connId) {
-        readGate.close(connId);
+        readAdmission.close(connId);
         tpWebsocket.dispatch(0, MsgWebsocket{MsgWebsocket::Terminate{connId}});
         hubTrigger->send();
     }
@@ -238,7 +239,7 @@ struct RelayServer {
         hubTrigger->send();
     }
 
-    void sendEvent(uint64_t connId, const SubId &subId, std::string_view evJson) {
+    void sendEvent(uint64_t connId, const SubId &subId, std::string_view evJson, uint64_t admissionId = 0) {
         PROM_INC_RELAY_MSG("EVENT");
         auto subIdSv = subId.sv();
 
@@ -251,7 +252,7 @@ struct RelayServer {
         reply += evJson;
         reply += "]";
 
-        sendToConn(connId, std::move(reply), true);
+        sendToConn(connId, std::move(reply), true, subId.str(), admissionId);
     }
 
     void sendEventToBatch(RecipientList &&list, std::string &&evJson) {
