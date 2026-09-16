@@ -4,7 +4,7 @@
 
 strfry is a relay for the [nostr protocol](https://github.com/nostr-protocol/nostr)
 
-* Supports most applicable NIPs: 1, 2, 4, 9, 11, 28, 40, 42, 45, 70, 77
+* Supports most applicable NIPs: 1, 2, 4, 9, 11, 28, 40, 42, 45, 77; NIP-70 is available by explicit opt-in in this fork
 * No external database required: All data is stored locally on the filesystem in LMDB
 * Hot reloading of config file: No server restart needed for many config param changes
 * Zero downtime restarts, for upgrading binary without impacting users
@@ -15,6 +15,16 @@ strfry is a relay for the [nostr protocol](https://github.com/nostr-protocol/nos
 * Prometheus metrics endpoint for monitoring relay activity (client/relay messages by verb, events by kind)
 
 If you are using strfry, please [join our telegram chat](https://t.me/strfry_users). Hopefully soon we'll migrate this to nostr.
+
+This fork also supports optional [plugin-owned whole-relay REQ admission](docs/plugins.md#read-admission-plugins).
+Community membership stays in the plugin, with eventually consistent periodic
+connection rechecks, not per-event community ACLs. See the
+[Budabit architecture and decisions](deploy/budabit/READ-CONTROL-PLAN.md) and
+[operator guide](deploy/budabit/PRIVATE-READS.md). Independently, kinds `4`, `1059`
+and `4444` always require an authenticated participant to read; disabling admission
+does not disable DM privacy. `relay.nip70.enabled` defaults to `false`: protection
+tags are preserved but their NIP-70 semantics are not enforced or advertised.
+These are source capabilities, not evidence that a deployed image has been upgraded.
 
 <hr>
 

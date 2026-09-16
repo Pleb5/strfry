@@ -13,6 +13,13 @@ The deployed revision subsequently failed a cold-ingestion outsider test on
 2026-09-14. The source readiness fix below is covered by new startup/reload tests;
 it is not yet recorded as deployed. See [INCIDENT-2026-09-14.md](INCIDENT-2026-09-14.md).
 
+**Current scope:** this document owns signed-author **write** rules. Optional
+[plugin-owned read admission](READ-CONTROL-PLAN.md) is now implemented separately,
+default off and not recorded as deployed. Public reads remain the public preset;
+the private preset requires AUTH and enforcing write policy but does not turn
+readership into a universal prerequisite for EVENT. The deployment/phases below
+are historical records where dated, not proof of the current running image.
+
 Implementation note discovered during phase 1: strfry treats every `a`
 tag on a `kind:5` as an NIP-09 target and rejects the event when the
 address pubkey differs from the signer. Budabit's report retractions,
@@ -56,10 +63,10 @@ is needed or made; no legacy-shape deletes were found on the live relays.
 
 ### Non-goals
 
-- **Read restriction.** Budabit deliberately uses public reads and no NIP-42
-  (`Budabit-Community-Architecture.md`, "Clean Break Scope"). The plugin does
-  not gate REQ/COUNT/NEG-OPEN. Appendix A records what read-side curation
-  would require so the decision is explicit.
+- **Read restriction in the write plugin.** This channel does not gate
+  REQ/COUNT/NEG-OPEN. Optional whole-relay membership admission uses a separate
+  read process; per-event community read curation remains out of scope (Appendix A).
+  Public community reads with signed-author write enforcement remain supported.
 - **Being an authority.** Budabit's render-time authority check remains
   mandatory (`Budabit-Community-Moderation.md`, "The render-time authority
   check is mandatory"). The client MUST keep filtering; the plugin is a
@@ -84,9 +91,9 @@ is needed or made; no legacy-shape deletes were found on the live relays.
 | D1 | Python 3, standard library only, same interpreter as the existing `write-policy.py`. | Already in the Alpine image; no new toolchain. Semantic parity with the TypeScript client is guaranteed by golden test vectors exported from Budabit (§8), not by sharing code. |
 | D2 | Hosted communities use exact definition addresses `32222:<owner>:<communityId>`, selected explicitly and/or discovered by valid definition `r` tags matching `BUDABIT_AUTO_HOST_URL`. | Same-ID branches remain distinct. Auto-hosting shipped in phase 5 and is the live September configuration, with an empty explicit list. |
 | D3 | Default mode is **passthrough**: events not attributable to a hosted branch are handed to the existing rate/storage policy only. A **strict** mode rejects them. | `relay.budabit.club` is a public-write relay today; members also publish personal kinds (0, 3, 10002, 10050, 10063, 10000, 30078) there per the publishing policy. Strict mode serves dedicated community relays. |
-| D4 | The plugin learns state from two sources: (a) inline observation of every accepted authority event (it sees every write), and (b) a warm-up/reconcile scan of the relay's own LMDB via `strfry scan` in a background thread. | (a) closes the grant-then-publish race on the same relay with zero latency. (b) survives plugin restarts and covers `strfry import`/`sync`, which bypass or run with different source types. No WebSocket client dependency needed. |
-| D5 | Fail closed for hosted-branch content while state is unknown; fail open for passthrough traffic. | Matches Budabit: "Missing authority evidence fails closed." A transient `error:` reply tells clients to retry. |
-| D6 | Rejections use NIP-01 machine-readable prefixes: `blocked:` (policy), `invalid:` (malformed Communikeys structure), `rate-limited:`, `error:` (transient, e.g. warming up). | Self-authenticating writes; no NIP-42. Same convention the V1 doc proposed. |
+| D4 | The plugin learns state from (a) inline accepted authority events and (b) a warm-up/reconcile scan of the relay's own LMDB via `strfry scan` in a background thread. | Inline observation reduces same-relay grant races but is speculative until storage accepts. Reconciliation handles restarts/imports and storage rejection (§10). Read admission never consumes this speculative state. |
+| D5 | Gate all new writes until this instance completes its initial load; afterwards fail closed for unavailable hosted-branch authority while allowing unrelated passthrough traffic through later pipeline stages. | Undiscovered must not mean unhosted during startup. A transient `error:` reply tells clients to retry; dry-run does not bypass initial loading. |
+| D6 | Rejections use NIP-01 machine-readable prefixes: `blocked:` (policy), `invalid:` (malformed Communikeys structure), `rate-limited:`, `error:` (transient, e.g. warming up). | Signed-author policy does not depend on NIP-42. A separately enabled private relay requires AUTH before EVENT without replacing these rules. |
 | D7 | Enforcement is advertised relay-side, not (yet) in the signed definition. | The V1 `["r", url, "enforced"]` marker is invalid in V2 (`r` has exactly two values). A V2 declaration needs a Communikeys amendment (§3.7); until then NIP-11 or out-of-band. |
 | D8 | Person-ban evaluation, moderator protection, shard union, replacement and deletion rules are implemented to match `community-reports.ts` / `community-permissions.ts` / `community-protocol.ts` exactly, including fixpoint iteration for bans. | Any divergence would make the relay reject what the client shows, or vice versa. Golden vectors (§8) pin this. |
 
@@ -496,8 +503,14 @@ readiness inference.
 - **Timeout**: plugin failure yields `error: internal error` and respawn.
   State is rebuilt from scoped LMDB scans. A respawn loses in-memory deletion
   knowledge that those scans do not cover (§10), as well as costing warm-up.
-- **NIP-70 protected events** are rejected by strfry since NIP-42 is off; no
-  plugin involvement.
+- **NIP-70 protected events:** current source defaults `relay.nip70.enabled` to
+  `false`, ignoring protection semantics while preserving signed tags and ordinary
+  validation. Explicit enable restores author-AUTH and embedded-repost checks in
+  C++, not Python. The recorded public `2fc1b38` image instead rejected protected
+  events with AUTH disabled; do not carry that historical behavior into source claims.
+- **Read admission and DMs:** `read-policy.py` uses independent storage scans and
+  checks authenticated reader keys, not event-author write eligibility. Core DM
+  participant restrictions for `4`/`1059`/`4444` apply even when admission is off.
 - **Kind 41** is treated as replaceable by this revision (runbook note);
   irrelevant to Communikeys but keep the retention test.
 
@@ -514,8 +527,10 @@ readiness inference.
   extension (§3.7 option 1) uses `relay.info.extra` and is deployed in `2fc1b38`.
 - `RUNBOOK.md`: new sections — configuring branches, reading rejection logs,
   what to do when a shard is missing on this relay, how to run the audit and
-  optional sweep, how to roll back to rate-limit-only (clear both
-  `BUDABIT_BRANCHES` and `BUDABIT_AUTO_HOST_URL`, then recreate the container).
+  optional sweep, how to roll back a **public** deployment to rate-limit-only
+  (clear both `BUDABIT_BRANCHES` and `BUDABIT_AUTO_HOST_URL`, then recreate the
+  container). This is not a private rollback: keep read admission and enforcing
+  write policy intact or remain stopped; see [PRIVATE-READS.md](PRIVATE-READS.md).
 - `README.md`: one paragraph describing the plugin's role and linking here.
 
 Completed rollout for `relay.budabit.club`: empty `BUDABIT_BRANCHES`,
@@ -670,18 +685,20 @@ required. See the dated deployment record for checkpoints and safeguards.
 
 ## Appendix A — Read-side curation (explicitly out of scope)
 
-Budabit chooses public reads and no NIP-42. A relay-side read curation
-("serve only currently-admitted events for `#h` queries") would require a
-strfry core hook: `ReadRestrictor` currently only gates restricted kinds
-behind NIP-42. Post-filtering REQ results by the plugin's writer sets would
-need either (a) a query-time filter callback into a policy process (new
-IPC, latency on every REQ), or (b) materialising admission as a stored flag
-and a hidden index (schema change, invalidated on every grant/ban change).
-Both are large, and (b) conflicts with Budabit's "regrant refetches history"
-model. The write-side plugin plus optional sweeps gives most of the storage
-and spam benefit without touching the read path; revisit only if Budabit
-adopts an owner-signed enforcement declaration (§3.7 option 2) and wants to
-drop client-side `authors` filtering entirely.
+Do not confuse **reader admission** with **content curation**. The implemented
+[read plugin](READ-CONTROL-PLAN.md) decides whether any verified key may read the
+whole endpoint before executing a REQ and during periodic connection rechecks.
+It does not inspect filters, event authors or results. Retained content and imports
+can therefore include records that the client must hide under current grants or
+moderation, even on a members-only relay.
+
+Serving only currently admissible community content would require additional
+per-event policy or materialized admission state, with grant/ban invalidation and
+query-completeness consequences. Neither is implemented or part of the chosen
+read design. The existing core `ReadRestrictor` protects DM participants separately;
+it is not a community curation engine. Client render-time checks remain mandatory,
+and regrant may make retained content visible again. Optional sweeps change that
+retained history and require separate operator authorization.
 
 ## Appendix B — Mapping to Budabit source
 

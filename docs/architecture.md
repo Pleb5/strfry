@@ -6,7 +6,7 @@ The [golpe](https://github.com/hoytech/golpe) application framework is used for 
 
 ## Database
 
-strfry is built on the embedded [LMDB](https://www.symas.com/lmdb) database (using [my fork of lmdbxx](https://github.com/hoytech/lmdbxx/) C++ interface). This means that records are accessed directly from the page cache. The read data-path requires no locking/system calls and it scales optimally with additional cores.
+strfry is built on the embedded [LMDB](https://www.symas.com/lmdb) database (using [my fork of lmdbxx](https://github.com/hoytech/lmdbxx/) C++ interface). This means that records are accessed directly from the page cache. Record access avoids per-record locking/system calls; relay lifecycle and admission coordination are separate from this database property.
 
 Database records are serialised either with [Flatbuffers](https://google.github.io/flatbuffers/) or a bespoke packed representation, both of which allow fast and zero-copy access to individual fields within the records. A [RasgueaDB](https://github.com/hoytech/rasgueadb) layer is used for maintaining indices and executing queries.
 
@@ -26,7 +26,10 @@ strfry starts multiple OS threads that communicate with each-other via two chann
 * Non-copying message queues
 * The LMDB database
 
-This means that no in-memory data-structures are accessed concurrently. This is sometimes called "shared nothing" architecture.
+Most query/write state follows this message-passing, "shared nothing" architecture.
+The optional read-admission coordinator is an explicit exception: it owns a
+mutex-protected connection/job map shared by the ingester, policy worker, cron and
+output paths. Membership state is not shared with those threads; it stays in the plugin.
 
 Each individual thread has an "inbox". Typically a thread will block waiting for a batch of messages to arrive in its inbox, process them, queue up new messages in the inboxes of other threads, and repeat.
 
@@ -69,6 +72,38 @@ This thread is responsible for most DB writes:
 
 It is important there is only 1 writer thread: Because LMDB has an exclusive-write lock, multiple writers would imply contention. Additionally, when multiple events queue up, there is work that can be amortised across the batch (and the `fsync`). This serves as a natural counterbalance against high write volumes.
 
+## Read admission (optional)
+
+With `relay.readPolicy.plugin` configured, the path before ReqWorker is:
+
+```text
+WebSocket -> Ingester -> verified AUTH keys + parsed REQ
+                             |
+                         ReadAdmission -> ReadPolicyProcess -> plugin stdin/stdout
+                             | allow
+                         ReqWorker -> ReqMonitor -> WebSocket
+```
+
+`ReadAdmission.h` owns bounded jobs, verified-key generations, subscription tokens
+and periodic connection rechecks. `ReadPolicyProcess.h` owns the persistent JSONL
+child and bounded IPC. AUTH updates are dispatched to query/monitor workers before
+updated admission state can authorize their work. Delayed decisions cannot revive
+cancelled subscriptions or dead connections; queued EVENT/EOSE and live recipient
+batches retain the subscription token through final output.
+
+The core does not know community addresses, readers or policy-relevant event kinds.
+One plugin allow covers the whole REQ; there is no community membership callback
+per event. A denial or unavailable decision closes the connection. Rechecks use
+the same predicate without new client signatures. The worker alternates due
+rechecks and queued requests to avoid starving either class.
+
+Admission does not change the writer, expiry or DB-change ordering. In the Budabit
+plugin, independent bounded local scans refresh an in-memory eligible-reader set.
+There are no commit notices, reader snapshot files or final-send membership locks.
+Membership revocation is eventually consistent; final-send checks concern lifecycle
+cancellation only. See the [plugin protocol](plugins.md#read-admission-plugins) and
+[Budabit decisions](../deploy/budabit/READ-CONTROL-PLAN.md).
+
 ## ReqWorker
 
 Incoming `REQ` messages have two stages. The first stage is retrieving "old" data that already existed in the DB at the time of the request.
@@ -97,9 +132,16 @@ When a user's `REQ` is being processed for the initial "old" data, each `Filter`
 
 * The key no longer matches the filter item
 * The event's `created_at` is before the `since` filter field
-* The filter's `limit` field of delivered events has been reached
+* The filter's `limit` of matching query candidates has been reached (before independent read restrictions)
 
 Once this completes, a scan begins for the next item in the filter field. Note that a filter only ever uses one index. If a filter specifies both `ids` and `authors`, only the `ids` index will be scanned. The `authors` filters will be applied when the whole filter is matched prior to sending.
+
+`ReadRestrictor` independently filters restricted events after query limits. In this
+fork, kinds `4`, `1059` and `4444` always require an authenticated author or valid
+`p`-tag participant, even when community admission is off. Therefore EOSE plus fewer
+received events than the limit does not by itself prove an exhaustive query. The
+Budabit private reader separates authority/text filters and requires explicit
+unfiltered-kind coverage rather than treating inaccessible DMs as missing authority.
 
 An important property of `DBScan` is that queries can be paused and resumed with minimal overhead. This allows us to ensure that long-running queries don't negatively affect the latency of short-running queries. When ReqWorker first receives a query, it creates a DBScan for it. The scan will be run with a "time budget" (for example 10 milliseconds). If this is exceeded, the query is put to the back of a queue and new queries are checked for. This means that new queries will always be processed before resuming any queries that have already run for 10ms.
 
@@ -135,13 +177,20 @@ After an event has been processed, all the matching connections and subscription
 
 These threads implements the provider-side of the [negentropy syncing protocol](https://github.com/hoytech/negentropy).
 
-When [NEG-OPEN](https://github.com/hoytech/strfry/blob/master/docs/negentropy.md) requests are received, these threads perform DB queries in the same way as [ReqWorker](#reqworker) threads do. However, instead of sending the results back to the client, the IDs of the matching events are kept in memory, so they can be queried with future `NEG-MSG` queries. Alternatively, if the query can be serviced with a [pre-computed negentropy BTree](#syncing), this is used instead and the query becomes stateless.
+When [NEG-OPEN](negentropy.md) requests are received, these threads perform DB queries in the same way as [ReqWorker](#reqworker) threads do. However, instead of sending the results back to the client, the IDs of the matching events are kept in memory, so they can be queried with future `NEG-MSG` queries. Alternatively, if the query can be serviced with a pre-computed negentropy BTree, this is used instead and the query becomes stateless.
 
+Queries that may contain restricted events bypass shared precomputed trees and use
+participant-filtered memory reconciliation. COUNT has no per-event output filter,
+so potentially restricted counts must be safely scoped to an authenticated
+participant, including filters without `kinds`. Admission mode disables both COUNT
+and Negentropy instead of creating additional plugin admission protocols.
 
 
 ## Cron
 
-This thread is responsible for periodic maintenance operations. Currently this consists of applying a retention-policy and deleting ephemeral events.
+This thread is responsible for periodic maintenance operations, including retention
+and ephemeral-event expiry. With admission enabled it also ticks decision deadlines;
+the separate read-policy worker performs the actual periodic plugin calls.
 
 
 # Testing
