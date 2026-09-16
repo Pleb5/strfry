@@ -1,5 +1,9 @@
 # Event-sifter plugins
 
+This section describes **write** plugins (`relay.writePolicy.plugin`). Optional
+[read-admission plugins](#read-admission-plugins) use a separate process and
+protocol; do not send read decisions over the event-sifter channel.
+
 In order to reduce complexity, strfry's design attempts to keep policy logic out of its core relay functionality. Instead, this logic can be implemented by operators by installing policy plugins to decide which events to store. Among other things, plugins can be used for the following:
 
 * White/black-lists (particular pubkeys can/can't post events)
@@ -86,3 +90,98 @@ To install:
 * If events are being rejected with `error: internal error`, then check the strfry logs. The plugin is misconfigured or failing.
 * Normally when a plugin blocks an event, it will log a message. Especially when using plugins in `stream`, `router`, etc, this might be too verbose. In order to silence these logs, return an empty string for `msg` (or no `msg` at all).
 * When returning an action of `accept`, it doesn't necessarily guarantee that the event will be accepted. The regular strfry checks are still subsequently applied, such as expiration, deletion, etc.
+
+## Read-admission plugins
+
+This fork provides a default-off whole-relay admission interface. Configure
+`relay.readPolicy.plugin` with an executable command to enable it. An empty command
+disables admission; a configured command that is missing or broken **never** means
+public access. The relay requires NIP-42 AUTH with a valid `wss://` service URL,
+`relay.maxFilterLimitCount = 0` and `relay.negentropy.enabled = false` in this mode.
+Use nested blocks in the config file, as in the
+[Budabit operator example](../deploy/budabit/PRIVATE-READS.md#configure-the-replacement-explicitly).
+
+The core authenticates identities, then asks the plugin before executing each REQ.
+One allow admits all of that REQ's filters, historical scan and live subscription.
+No filter subdivision, event inspection or per-event policy call occurs. Independent
+DM participant restrictions still apply. AUTH success is not admission: a valid
+nonmember proof receives `OK true`, followed by denial when that client requests data.
+
+An invalid AUTH proof instead receives `["OK", "<auth-event-id>", false, "<reason>"]`.
+There is no `AUTH-FAILED` message, and membership denial must not be disguised as
+failed signature/challenge verification.
+
+### Read IPC contract
+
+The relay starts one persistent subprocess through `/bin/sh -c` on its dedicated
+read-policy worker. The worker serializes requests and uses nonblocking pipes and
+a monotonic deadline; it does not compete for the write-plugin channel. The plugin
+must flush exactly one JSON line to stdout per request, without banners, diagnostics
+or unsolicited messages. The entire response, including newline, is limited to
+4096 bytes. Treat the plugin as trusted operator code, not a sandboxed extension.
+
+Request (key shown as a placeholder; actual keys are 64-character hex strings):
+
+```json
+{"type":"read-admission","request_id":"123","authenticated_pubkeys":["<verified-pubkey>"]}
+```
+
+Response:
+
+```json
+{"request_id":"123","decision":"allow"}
+```
+
+Echo the opaque string `request_id` exactly. The only decisions are `allow`, `deny`
+and `unavailable`; a well-formed `unavailable` is not a membership denial. Keys are
+the connection's verified AUTH keys (up to 32), never `authors` or `#p` filter values.
+There are no event bodies, filters, branch coordinates or membership rosters in
+this protocol. A plugin decides what eligibility means; the Budabit plugin allows
+when **any** authenticated key is a current eligible reader.
+
+An active connection is rechecked through this same interface without asking the
+client for another signature. A successful REQ decision or recheck starts the next
+recheck interval. Connections without subscriptions need no periodic decision;
+their next REQ is checked normally. Rechecks and new requests share worker capacity.
+
+### Read settings and failures
+
+All `relay.readPolicy` settings require a restart:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `plugin` | `""` | Disabled unless a command is configured |
+| `timeoutSeconds` | `2` | Queue plus IPC budget, not just time spent in the child; range 1–30 |
+| `recheckSeconds` | `5` | Interval after a successful decision; range 1–300 |
+| `maxPending` | `1024` | Queued REQ decisions; range 1–65536 |
+| `maxConnections` | `4096` | Connections in admission mode; range 1–100000 |
+
+Unlike the write plugin, the read plugin has no script-mtime reload contract.
+Restart after command, code, environment or admission configuration changes.
+Incompatible changes to required AUTH/read-limit/restriction settings fail closed.
+Legacy `readControl.enabled=true` refuses startup; it is not an alias for admission.
+
+| Condition | Client-visible outcome |
+| --- | --- |
+| REQ before AUTH | AUTH challenge plus `CLOSED` with `auth-required: authenticate to read this relay`; connection retained for AUTH/retry |
+| Plugin denies | `CLOSED` with `restricted: read access denied`, then disconnect |
+| Policy unavailable or decision expires | `CLOSED` with `error: read policy temporarily unavailable`, then disconnect |
+| Admission queue/subscription capacity exceeded | `CLOSED` with `rate-limited: read admission capacity exceeded`, then disconnect |
+| Authenticated COUNT | `CLOSED` with `blocked: COUNT disabled with read admission` |
+
+Malformed/oversized/mismatched output, EOF, pipe failure or an IPC timeout stops the
+process and invalidates active read service depending on it. A later request can
+start a new process, but cannot execute without a fresh allow. Queue expiry alone
+fails the affected connection, not every otherwise healthy connection. At the
+connection limit, excess connections are closed before REQ admission.
+
+`CLOSE`, REQ replacement, identity-state changes and disconnection invalidate stale
+work. Lifecycle tokens accompany queued history/live output and EOSE; they are not
+policy versions or database epochs. Interrupted history cannot claim successful
+EOSE. There is no commit-atomic revocation or ability to retract transmitted bytes.
+
+NIP-11 advertises the core's generic `read_policy` version 1, `admission: "req"`,
+`consistency: "eventual"`, configured `recheck_seconds`, and
+`limitation.auth_required: true`. These facts do not claim what the plugin's policy
+means. Community-specific semantics, cache freshness and operating requirements
+are documented in [the Budabit read contract](../deploy/budabit/READ-CONTROL-PLAN.md).

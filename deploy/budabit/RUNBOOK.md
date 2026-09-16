@@ -11,6 +11,8 @@ whichever source commit a later checkout or rebase happens to select.
 
 ## Current status
 
+This is the last recorded deployment inventory, not a fresh live inspection.
+
 **Optional private source preset (not live):** see [PRIVATE-READS.md](PRIVATE-READS.md)
 for config/env preflight, conditional health, invitations, maintenance fences and
 private-capable rollback. The deployment templates now build a reviewed local
@@ -229,9 +231,16 @@ root-owned directory that the non-root container cannot write.
 
 ### Authentication and access
 
-NIP-42 is completely disabled. Ordinary clients do not receive AUTH
-challenges. NIP-70 protected events containing the `-` marker cannot be
-accepted and are rejected by strfry.
+In the recorded public `2fc1b38` deployment, NIP-42 is completely disabled.
+Ordinary clients do not receive AUTH challenges. NIP-70 protected events containing
+the `-` marker cannot be accepted and are rejected by strfry.
+
+That is historical image behavior, not the current source default. The new source
+defaults NIP-70 off (ignore its protection semantics, preserve signed tags) and
+always protects DM kinds `4`, `1059` and `4444`; usable DM reads require configured
+AUTH. Optional whole-relay admission has a separate configuration and periodic
+recheck contract. See [PRIVATE-READS.md](PRIVATE-READS.md) before building or operating
+that source; no image promotion is implied by these documentation updates.
 
 Writes are public rather than community-member-only. This avoids NIP-42 client
 compatibility problems but means the relay must be treated as an internet-facing
@@ -477,10 +486,15 @@ NIP-77 remains enabled because efficient reconciliation was a deployment goal.
 Uncached reconciliation is limited to 10,000 events, one Negentropy worker is
 used, and connections are limited to ten subscriptions.
 
-Negentropy is still a public resource surface. Strfry keeps a cached full-DB
-tree whose path does not enforce `maxSyncEvents` in the same way as uncached
+On the recorded image, Negentropy is still a public resource surface. Strfry keeps
+a cached full-DB tree whose path does not enforce `maxSyncEvents` in the same way as uncached
 queries. The 1280 MiB container memory limit is the final isolation boundary if
 many clients create concurrent sessions.
+
+Current source bypasses shared precomputed trees when a query may contain
+restricted events, using participant-filtered memory reconciliation. Private
+admission mode disables Negentropy entirely. Neither change has been verified on
+the recorded public image.
 
 ## Caddy and DNS
 
@@ -822,8 +836,10 @@ lists the later isolated and live checks separately.
 
 Strfry verifies an event signature before the write-policy plugin runs. A policy
 can therefore rate-limit or whitelist `event.pubkey` without requiring clients
-to complete NIP-42. NIP-42 is only necessary here for NIP-70 protected event
-publishing, which this relay intentionally does not support.
+to complete NIP-42. This remains true for the public write preset. In current
+source, NIP-42 also supports mandatory participant-only DM reads and optional
+whole-relay admission; explicit NIP-70 enable uses it for protected publication.
+These independent uses must not be confused with signed-author write authority.
 
 ### Public write access requires independent safety layers
 

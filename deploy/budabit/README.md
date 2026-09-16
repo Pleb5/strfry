@@ -1,6 +1,6 @@
 # Budabit relay deployment
 
-This deployment runs a public strfry relay at `relay.budabit.club`, with
+The last recorded live deployment runs a public strfry relay at `relay.budabit.club`, with
 Budabit community write enforcement enabled through auto-host discovery.
 NIP-42 is disabled and NIP-77 Negentropy is enabled.
 COUNT requests are disabled, and REQ filter/subscription limits are reduced to
@@ -20,6 +20,20 @@ race in the deployed `2fc1b38` policy. Warm-state thread rejection was separatel
 verified. The source now has a readiness barrier and cold-ingestion regression
 tests; no replacement VPS image is recorded as deployed yet. See
 [INCIDENT-2026-09-14.md](INCIDENT-2026-09-14.md).
+
+## Documentation map
+
+| Need | Document |
+| --- | --- |
+| Current read architecture, decisions and source map | [READ-CONTROL-PLAN.md](READ-CONTROL-PLAN.md) |
+| Private configuration, health/probes and safe rollback | [PRIVATE-READS.md](PRIVATE-READS.md) |
+| Local test evidence and outstanding release limits | [READ-ADMISSION-VERIFICATION.md](READ-ADMISSION-VERIFICATION.md) |
+| Signed-author write policy and historical implementation phases | [WRITE-CONTROL-PLAN.md](WRITE-CONTROL-PLAN.md) |
+| Recorded public inventory and operations | [RUNBOOK.md](RUNBOOK.md) |
+
+Source capabilities and dated deployment evidence are intentionally separate.
+The current source has optional eventual read admission, mandatory DM participant
+privacy and default-off NIP-70; none is evidence of an upgrade to the recorded image.
 
 ## Host layout
 
@@ -121,7 +135,7 @@ node test/tests/nip70Test.js # default-off NIP-70 switch
 
 Implemented in source, default off; not a claim of a live/private release.
 See [the private operator guide](PRIVATE-READS.md) for fresh configuration,
-preflight/health, invitation, exclusive-writer maintenance and safe rollback.
+preflight/health, invitation, offline maintenance and safe rollback.
 The deployment Dockerfile builds the reviewed local checkout (including initialized
 submodules), not the historical pinned public core. Compose checks config/env
 agreement before starting; a private-capable binary and policy must ship together.

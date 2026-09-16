@@ -72,6 +72,13 @@ are ignored; retain/remove them only during an explicit stopped maintenance task
 Do not point an old image at a new private configuration: use the reviewed new
 entrypoint and probe the actual running binary before opening ingress.
 
+All `relay.readPolicy` settings are restart-required. Restart after changing the
+read executable or environment too; the write plugin's mtime reload behavior does
+not apply to the read process. Do not hot-reload incompatible AUTH, restriction or
+query-limit settings while privately serving: the core fails closed on disagreement.
+The generic protocol/defaults are documented in
+[plugins.md](../../docs/plugins.md#read-admission-plugins).
+
 ## Expected delays and failure behavior
 
 - The plugin refreshes its own in-memory view; REQs are cheap lookups, not scans.
