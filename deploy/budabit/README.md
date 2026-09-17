@@ -35,6 +35,12 @@ Source capabilities and dated deployment evidence are intentionally separate.
 The current source has optional eventual read admission, mandatory DM participant
 privacy and default-off NIP-70; none is evidence of an upgrade to the recorded image.
 
+Shared relays can host publicly readable communities with independent write control.
+For member-only reads, prefer a dedicated, community-controlled relay instance/database;
+multi-community read isolation within one database is deliberately deferred. See
+[the hosting options](PRIVATE-READS.md#choose-the-hosting-model) and
+[the architecture trade-offs](READ-CONTROL-PLAN.md#design-decisions-and-trade-offs).
+
 ## Host layout
 
 - Existing deployment bundle (**not a Git checkout**): `/opt/strfry`
@@ -166,9 +172,15 @@ running plugin is current or that a particular member can read. Use real
 authenticated member/outsider probes before opening ingress.
 
 Keep maintenance offline; do not disable admission to repair a private database.
-Budabit retains private invitations, publication isolation, memory-only data and
-bounded complete-authority requirements. Discoverability/application exceptions
-and full public-feature parity are not part of this mode.
+Budabit uses relay-only read protection (client consolidation `d78c6a5d8`). Explicit
+invitations require authentication consent and use their relay hints for definition
+lookup without public discovery/outbox fallback. Once delivered, events use ordinary
+shared persistent storage, routing, publication, diagnostics and application features.
+Logout or revocation does not purge or hide cached data. There is no isolated private
+reader, publication destination guard or private-capability/completeness gate.
+The signed `read-access=members` tag is metadata, not relay configuration or a
+downstream confidentiality guarantee. Whole-relay admission adds no public
+discovery/application read exemption; arrange initial grants out of band as needed.
 
 Independently, kind4444 (and retained kind4/1059) reads always require an authenticated
 participant, even with community admission off or optional kind restrictions empty.

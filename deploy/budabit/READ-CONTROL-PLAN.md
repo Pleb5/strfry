@@ -1,6 +1,6 @@
 # Community reads: plugin-owned REQ admission
 
-Status: **implemented in source, default off**. Updated 2026-09-16. This is the
+Status: **implemented in source, default off**. Updated 2026-09-17. This is the
 current architecture/decision record, despite the retained `PLAN` filename. It
 replaces the commit-synchronized ReadGate design, which remains in Git history.
 It is not a live-deployment or release claim.
@@ -15,6 +15,7 @@ It is not a live-deployment or release claim.
 | Decision | Reason and consequence |
 | --- | --- |
 | Keep client-only moderation, public reads with write enforcement, and optional member-only reads as distinct deployment levels | Read admission is not required to use Communikeys or the write plugin. An empty `readPolicy.plugin` preserves public community reads, not public DM reads. |
+| Share public write-controlled hosting; dedicate private instances/databases | One community governs a private database. Multi-community read isolation is deliberately deferred; simpler authorization trades away shared-database hosting efficiency. |
 | Authenticate identity separately from admitting reads | Valid NIP-42 proofs succeed even for nonmembers. The read plugin alone decides eligibility; EVENT rules still use the verified event author. |
 | Admit the whole relay once per REQ | No public-kind exceptions, mixed-filter ACL analysis, result buffering or per-event community policy. Simplicity costs public discovery and applicant reads on that endpoint. |
 | Keep all membership semantics in Python | Reuse the existing `Branch` derivation and vectors without embedding a community roster/address or general policy framework in C++. |
@@ -23,13 +24,26 @@ It is not a live-deployment or release claim.
 | Build fresh read state from local storage, never speculative write acceptance | A write-plugin `accept` can still be rejected by storage. Completed bounded scans avoid that speculative source, but are not one global LMDB transaction. |
 | Distinguish denial from unavailability and disconnect on either | No unchecked query or indefinite old allow. Clients may explicitly retry on a fresh authenticated connection; transient failure must not be presented as an empty archive. |
 | Preserve independent DM privacy and default NIP-70 off | Encryption, participant reads, community eligibility and protected-event publication are separate policies, not one privacy switch. |
-| Preserve client content checks and publication isolation | Relay admission grants access to retained candidates, not endorsement, current section authorship, complete history or safe external fanout. |
+| Preserve ordinary client content checks, not publication isolation | Relay admission grants access to retained candidates, not endorsement, current section authorship or complete history. Delivered data uses ordinary storage/publication; safe external fanout is not guaranteed. |
 
 One exact `BUDABIT_BRANCHES` address governs each private endpoint/database. It is
 an authority coordinate, not a URL, download instruction or automatic request to
 host every discovered community. Auto-hosting and dry-run are prohibited in the
 private preset. Every stored kind is behind admission; AUTH/control messages and
 NIP-11 are not stored-event exceptions.
+
+Prefer a dedicated, community-controlled instance/database for member-only reads,
+whether self-operated or entrusted to a chosen operator. Public-read deployments
+can enforce independent community write policies in a shared relay. Different URLs
+pointing to one database do not create separate private read boundaries; multiple
+private communities require separately configured instances/databases under this
+design. Those instances may share a host, but still trust its administrator and
+share infrastructure risks. Dedicated hosting adds no encryption or downstream
+confidentiality. This is a deliberate implementation scope, not a claim that NIP-29
+or other multi-tenant designs cannot be secure. The cross-repository rationale is
+`budabit/docs/architecture/Community-Access-Decisions.md`, under “Hosting boundary:
+shared public writes, dedicated member-only reads”; practical guidance follows in
+[the operator guide](PRIVATE-READS.md#choose-the-hosting-model).
 
 ## Contract
 
@@ -125,24 +139,33 @@ community mode. COUNT must be safely participant-scoped; shared Negentropy trees
 are bypassed when results may include restricted events. Community mode disables
 COUNT/Negentropy entirely. NIP-70 is a separate default-off switch.
 
-Budabit retains ACK-confirmed AUTH, consent and signer lifecycle safeguards,
-private invitation routing, isolated memory-only repositories, signed private
-intent, destination guards, deletion-aware authority and diagnostics privacy.
-Denied sockets are disposed; explicit retry establishes a new socket/identity
-proof. Late CLOSED/disconnect callbacks cannot complete a terminated request.
+Budabit's consolidated client (`d78c6a5d8`) uses **relay-only read protection**.
+It retains ACK-confirmed AUTH, consent, signer lifecycle safeguards and explicit
+invitation definition lookup through relay hints without public discovery/outbox
+fallback. It uses pooled sockets; explicit retry replaces closed/failed connections
+and obtains a fresh proof while retaining healthy shared connections. Neither
+denial nor interrupted history is a successful empty query.
 
-Limited results remain limited results: separate authority and text filters each
-need explicit unfiltered-kind coverage, a known positive cap, a below-cap received
-count and successful EOSE before the client can establish bounded completeness.
-Reaching either cap remains partial, not complete. Retained content still requires
-current client admission. No public discovery or applicant-specific exemptions are added.
+Delivered events are ordinary client data: shared repository, persistent cache,
+normal routes, content-authority/moderation checks, publication and diagnostics.
+Logout, account change, denial and revocation do not purge or hide cached events.
+There is no isolated memory-only reader, private publisher/destination guard,
+private-capability requirement, private diagnostics boundary or separate bounded
+authority/text completeness gate. Transport EOSE is not proof of complete authority
+or unlimited history. Ordinary authority loading remains necessary; relay admission
+does not establish correctness of the client's cached authority view.
 
-The current invitation-first join process arranges a grant through an independently
-private-capable workflow, then explicitly retries. Discoverable definitions or a
-minimal public descriptor, public forms, encrypted contact, and applicant-specific
-visibility remain future choices, not implicit exceptions. Full signed `32222`
-definitions cannot be selectively redacted without changing the signed event;
-public `1069` response tags are plaintext and unsuitable for private answers.
+Signed `read-access=members` is preserved metadata, not client routing/export policy
+or a relay configuration switch. The initial invitation lookup restriction does not
+constrain subsequent ordinary application destinations. External Git, media, Blossom
+and widget features are not disabled to enforce confidentiality.
+
+Whole-relay admission still has no public discovery or applicant-specific read
+exemption. Arrange an initial grant out of band when necessary, then retry. Ordinary
+forms may be used after admission, but the client cannot fetch a form hidden behind
+membership on behalf of an outsider. Full signed `32222` definitions cannot be
+selectively redacted without changing the signed event; public `1069` response tags
+are plaintext and unsuitable for private answers.
 
 ## Capabilities, migration and evidence
 
@@ -163,10 +186,10 @@ leakage. `unfiltered_kinds` means no post-limit involved-key filtering for those
 authenticated queries, not unlimited results or exemptions from membership.
 The core also advertises its normal limits, including `limitation.max_limit`.
 
-The client recognizes version 1 members/relay claims for compatibility. Version 2
-additionally requires generic version 1 `req`/`eventual` capability and an integer
-`recheck_seconds` in 1–300. Both need `auth_required: true`; neither a generic auth
-requirement nor NIP-11 alone proves membership enforcement by a trusted operator.
+These fields describe the server/operator contract. The consolidated client does
+not gate its normal reader or publisher on Budabit capability versions or
+`unfiltered_kinds`; ordinary AUTH and relay-limit scheduling still apply. Neither
+a generic auth requirement nor NIP-11 proves membership enforcement by an operator.
 
 Old `readControl.enabled=true` refuses relay startup rather than silently becoming
 public. Configure the replacement explicitly. No automatic config renderer or
@@ -175,8 +198,11 @@ disclosure migration is provided.
 Tests: `readAdmissionTest.js`, `budabitReadAdmissionTest.js`, `dm4444Test.js`, `nip70Test.js`,
 Python `test_read_admission.py` and `test_read_admission_preflight.py`, plus retained
 AUTH/write/read/client regressions. The old epoch/snapshot test suites were replaced,
-not relabeled as proof of the old guarantees. Native-client testing uses controlled
-keys and local storage; it is not a deployed proxy/signer or container audit.
+not relabeled as proof of the old guarantees. The historical isolated native-client
+suite was removed by client consolidation; its results do not verify the shared
+client path. See the revision-scoped [verification record](READ-ADMISSION-VERIFICATION.md).
+Current shared-client/real-core coverage is still a release requirement, not a
+deployed proxy/signer or container audit.
 
 Release still requires an authorized immutable server publication/client vector
 pin refresh, a verified container image and private-capable rollback, and controlled

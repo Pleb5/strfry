@@ -1,10 +1,21 @@
 # Read-admission replacement: provenance and verification
 
-Local source verification on 2026-09-15. No push, release, container promotion or
-live deployment is implied. See [the contract](READ-CONTROL-PLAN.md) and
+Historical local source verification on 2026-09-15, before Budabit's relay-only
+client consolidation at `d78c6a5d8`. No push, release, container promotion or live
+deployment is implied. See [the current contract](READ-CONTROL-PLAN.md) and
 [operator guide](PRIVATE-READS.md).
 
-## Retain/replace manifest
+**Do not use this record as verification of the current shared client.** The
+manifest and client results below describe the isolated reader implementation at
+the time of the recorded run, relative to the comparison revisions listed below.
+Consolidation removed its memory-only repository, private publisher/capability and
+diagnostics guards, and `private-community-native.test.ts`. The server architecture
+remains eventual admission, but those client tests and privacy guarantees do not
+carry forward. Current client tests cover ordinary data handling, invitation access,
+AUTH and shared transport; fresh shared-client/real-core integration evidence is
+still required. No new test runs are claimed by this documentation correction.
+
+## Historical retain/replace manifest
 
 This is a forward replacement in the existing checkouts, not a reset, rewritten
 history or isolated worktree. Comparison baselines:
@@ -30,7 +41,7 @@ history or isolated worktree. Comparison baselines:
 | Client retry / completeness | Denial disposes sockets; explicit retry authenticates anew. Separate bounded authority/text intake and unfiltered-kind evidence retained |
 | DM / NIP-70 | Independent participant privacy for 4444/retained 4/1059; separate default-off NIP-70 semantics |
 
-## Reproducible checks
+## Server checks
 
 Use a unique `TMPDIR` for each isolated relay run. Tests use controlled local keys
 and storage; they do not sign with live accounts or contact a production relay.
@@ -51,15 +62,15 @@ python3 deploy/budabit/check-read-control.py --config deploy/budabit/strfry.conf
 docker compose -f deploy/budabit/compose.yaml config --quiet
 ```
 
-Client verification includes focused privacy/access/AUTH tests, the opt-in
+At the historical run, client verification included focused privacy/access/AUTH tests, the opt-in
 `private-community-native.test.ts` against actual strfry/LMDB, Welshman regressions,
 type/lint/format checks and the retained cold mocked-browser private-community
-flow. A dedicated `oc2-browser` cold session also checks that a signed-out private
-invitation shows the access shell without text/authoring. The existing full dev
-stack/watchers are reused, not restarted. Mocked browser signing is not real-signer
+flow. A dedicated `oc2-browser` cold session also checked that a signed-out private
+invitation showed the access shell without text/authoring. The existing full dev
+stack/watchers were reused, not restarted. Mocked browser signing is not real-signer
 or deployed proxy evidence.
 
-## Local results
+## Historical local results (not rerun for client consolidation)
 
 - Consistent native build; all listed raw-relay regression suites passed.
 - Python: 196 tests passed. Client focus: 118 tests in eight files passed.
@@ -81,6 +92,11 @@ or deployed proxy evidence.
 
 ## Remaining release limits
 
+- Reverify the current shared client against actual strfry/LMDB, including admission,
+  denial, grant/deletion/ban/regrant, policy failure and delayed signer/reconnect
+  cases. Historical isolated-reader completeness and publication-boundary results
+  cannot establish the current client's behavior. Persistent cache and ordinary
+  downstream publication/diagnostics are now intentional, not privacy-test failures.
 - The published server-vector pin is unchanged and lacks the newer reader vector
   section. Local vectors agree; authorized immutable publication/pin refresh is
   still required before release.

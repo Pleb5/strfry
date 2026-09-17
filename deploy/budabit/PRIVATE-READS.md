@@ -15,6 +15,31 @@ The owner can bootstrap a missing definition only after a successful complete lo
 Ordinary members need the existing structural/moderator/any-section-grant role and
 must not be banned. Writes still use signed-author rules, not general readership.
 This is not encryption, prevention of copying, or retraction of previously public data.
+Budabit's current client contract is relay-only protection: received events enter
+shared persistent storage and ordinary application flows. Logout, account changes
+and relay revocation do not purge or conceal those events. Publication, external
+media/Git/Blossom/widgets and diagnostics are not subject to private-data isolation
+or private-only destination guards. Do not promise downstream confidentiality.
+
+## Choose the hosting model
+
+| Requirement | Recommended arrangement |
+| --- | --- |
+| Public community content with independently controlled writes | Shared public relay with community write enforcement; independent DM restrictions still apply |
+| Member-only community content | Dedicated relay instance/database, preferably community-operated or entrusted to a chosen operator |
+| Several private communities on one provider's infrastructure | Separate configured instances/databases; the provider remains trusted |
+| Different reader populations within one relay database | Not supported by the current private preset; multi-community read isolation is deliberately deferred |
+
+A dedicated instance/database keeps the community read boundary aligned with the
+deployment boundary. Separate URLs pointing to the same database are not isolation.
+Separate instances can share a physical host, but its administrator can access
+plaintext community data and host failures/resource contention can affect them all.
+Protect backups and exports under the same operator trust boundary.
+
+Self-hosting gives operational control, not a security certification. The community
+or its chosen operator takes responsibility for updates, monitoring, backups,
+recovery and availability. Public shared hosting still needs independent write
+checks, spam controls and resource limits. See the [architecture trade-offs](READ-CONTROL-PLAN.md#design-decisions-and-trade-offs).
 
 ## Configure the replacement explicitly
 
@@ -128,10 +153,15 @@ Keep ingress closed while using controlled keys to verify:
 7. COUNT/Negentropy remain disabled; independent DM participant protection still applies.
 
 The client invitation is `/c/<naddr>?read-access=members`; optional repeated `relay`
-query parameters override naddr hints. Private scopes never use public discovery,
-outboxes or newly discovered relay destinations. Signed members intent, validated
-capabilities and complete bounded authority intake are required for authoring.
-No public forms/join workflow or private Git/media/Blossom/widget parity is implied.
+query parameters override naddr hints. This explicit invitation requires AUTH
+consent and limits the initial definition lookup to those hints, without public
+discovery/outbox fallback. Subsequent ordinary application routing is not confined
+to those destinations. Signed `read-access=members` metadata neither enables relay
+enforcement nor imposes client export/publication restrictions. The client does not
+require the Budabit NIP-11 extension or a separate bounded private archive before
+rendering normal routes or authoring; normal content-authority checks still apply.
+The relay has no public definition/form read exception. An outsider may need a
+grant arranged outside this endpoint before retrieving its forms or definition.
 
 ## Independent DM and NIP-70 settings
 
