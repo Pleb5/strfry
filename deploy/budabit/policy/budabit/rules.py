@@ -226,7 +226,19 @@ def evaluate_branch(event, branch, config, authority_required):
                 community_id,
             )
         section_name = P.normalize_section_name(_tag_value(tags, "content") or "")
-        section = derived.definition.section_named(section_name) if section_name else None
+        if not section_name:
+            return _reject(
+                "invalid: admission form requires a non-empty content section",
+                "invalid_workflow_shape",
+                community_id,
+            )
+        # The owner stages copied forms before publishing the definition that
+        # renames/moves their section. Requiring the destination to exist yet
+        # deadlocks that migration. Only the owner can define new sections;
+        # delegated moderators still need authority over a current section.
+        if pubkey == derived.owner:
+            return _accept("hosted", community_id)
+        section = derived.definition.section_named(section_name)
         if section is None:
             return _reject(
                 "blocked: admission form names an unknown section", "unknown_section", community_id
@@ -352,6 +364,24 @@ def _strict_passthrough(event, state, config):
     pubkey = event.get("pubkey") or ""
     if kind == P.DELETE_KIND:
         return _accept("passthrough", reason="strict_delete")
+    if kind == P.PROFILE_LIST_KIND:
+        # Migration publishes new owner-owned shards before the definition
+        # references them. Admit these unscoped prerequisites in strict mode
+        # too, but they confer no authority until referenced and reconciled.
+        tags = event.get("tags") or []
+        d_tags = P.get_tags(tags, "d")
+        if (
+            len(d_tags) == 1 and P.exact_tag(d_tags[0], 2)
+            and not P.get_tags(tags, "h") and not P.has_marked_community_a(tags)
+        ):
+            identifier = d_tags[0][1]
+            community_id = identifier.split("-", 1)[0]
+            branch = state.branch(P.make_definition_address(pubkey, community_id))
+            if branch is not None and P.parse_profile_list_identifier(community_id, identifier):
+                unavailable = _availability(branch, branch.derived())
+                if unavailable:
+                    return unavailable
+                return _accept("hosted", community_id, reason="owner_staged_shard")
     branches = list(state.branches.values())
     if kind in PERSONAL_KINDS or kind in TARGETABLE_KINDS:
         # Role-based exceptions need the complete snapshot (grants and bans).

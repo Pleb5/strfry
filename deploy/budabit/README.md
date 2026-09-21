@@ -87,6 +87,16 @@ held as definitions/shards are protected too. The reply is
 and lists instead; report-only retractions remain allowed. Unknown e-only ids
 cannot be classified without a lookup and are not blocked by this tag rule.
 
+Section rename/move migrations stage permission lists and copied application
+forms before publishing the updated definition. The source policy accepts an
+owner's form for a non-empty destination section even before that section exists,
+using the exact marked community address to check ownership. Strict mode also
+accepts new owner-authored permission-list coordinates for that hosted community.
+These staged artifacts confer no new grants until the definition references the
+lists and reconciliation loads them. Delegated moderators still need current
+authority over the form's named section. This source fix requires a relay policy
+deployment to affect the running service.
+
 State is rebuilt from the relay's own LMDB with `strfry scan` at start and
 every `BUDABIT_RECONCILE_SECONDS`, and updated inline from accepted authority
 events. This reduces same-relay grant races; newly auto-hosted branches can
@@ -129,6 +139,7 @@ Tests (from the repository root):
 ```sh
 python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
 node test/tests/budabitPolicyTest.js   # needs ./strfry and test/node_modules
+BUDABIT_TEST_MODE=strict node test/tests/budabitPolicyTest.js # strict-mode rename/migration
 node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure recovery
 node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regression
 node test/tests/readAdmissionTest.js # real core, generic fixture plugin

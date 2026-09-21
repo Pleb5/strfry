@@ -248,7 +248,7 @@ branch: `owner`, `moderator(S)` (grant-capable for section S),
 | 1984 person report | `["p", target, "spam"]`, `h` + marked `a` | owner or all-sections-moderator | Others: `blocked: person reports require community-wide moderator authority`. Update `personBans`. |
 | 5 report retraction | `h`, `["e", reportId, "", reporter, "report"]`, `k=1984`; **no** marked branch `a` | Unless mixed with a protected deletion target | Removes the report from the effective set. Legacy marked `a` is still understood in stored history, but new writes carrying it are rejected. |
 | 1985 review label / room archive label | `h` (+ marked `a` where present) | section lookup for `(1985, ∅)` or moderator(any) | Budabit ignores non-authoritative labels. |
-| 30168 admission form | `h` + marked `a`, `content` tag = S | owner or moderator(S) | |
+| 30168 admission form | `h` + marked `a`, non-empty `content` tag = S | owner, or moderator(S) for a current section | The owner may stage a form for a future/renamed section before publishing the definition update. |
 | 1069 admission response | `h` + marked `a`, form `a` with marker `form` | R ≠ banned | Outsiders apply; must pass. One-active-submission rule is enforced client-side; the plugin only applies rate limits. |
 | 7 admission review | `e` with marker `response`, `k=1069`, form `a`, `content` tag = S, `h` + marked `a` | owner or moderator(S) | Other `kind:7` fall through to the section rule for `(7, ∅)`. |
 | 7 moderator-request decision | `e` to a 30000 request, `k=30000`, `h` + marked `a` | owner | |
@@ -257,6 +257,15 @@ branch: `owner`, `moderator(S)` (grant-capable for section S),
 | 30617 repo announcement | exactly one `h` = communityId | section rule (`Code-curator`) | Repos are directly bound; no wrapper. |
 | 11 / 9 / 1111 / 7 / 1985 / 31922 / 31923 / 9041 / 1623 / 30033 with `h` = communityId | exactly one `h` | section rule (3.3, 3.4) | Targetable originals normally carry a targeting id in `h`, not the communityId; they are passthrough unless the community id is used directly. |
 | stars/bookmarks (`h` + marked `a`, no community `p`) | | R ≠ banned | User preference events. |
+
+Section rename/move migrations publish and verify prerequisites **before** the
+updated definition: new owner-authored kind-30000 grant lists, copied kind-30168
+admission forms, and kind-1985 report-review labels. An owner's form must name
+a non-empty section and the exact hosted branch, but the destination section
+need not exist in the current definition yet. Only the owner can update that
+definition; other moderators require current authority over the named section.
+Forms and labels do not activate sections or grants. New lists become authority
+only when referenced by the definition and loaded from storage by reconciliation.
 
 Optional (flag `BUDABIT_REJECT_CENSORED_ADDRESSES=1`): when an effective
 event report carries a reason-bearing `a` target, reject later replacements
@@ -275,6 +284,10 @@ In strict mode (`BUDABIT_MODE=strict`) passthrough traffic is rejected with
   publish before membership").
 - `kind:5` from anyone, except protected-kind targets in §3.5 (deletions of own content).
 - `kind:1069` / moderator-request `kind:30000` (admission must stay open).
+- Unreferenced owner-authored `kind:30000` migration lists for an available,
+  warm hosted branch owned by that signer. These carry exactly one two-value
+  `d` of the form `<communityId>-<purpose>[.<shard>]`, no `h` or marked community
+  `a`, and remain non-authoritative until the definition references them.
 - Targetable originals (`31922, 31923, 9041, 1623, 30033`) whose author has
   the corresponding grant in at least one hosted branch (they are published
   to community relays alongside their wrapper).

@@ -363,7 +363,52 @@ class WorkflowRuleTests(RulesBase):
         self.assert_accept(form(MOD_GENERAL, "General"))
         self.assert_reject(form(MOD_GENERAL, "Code-curator"), "form_authority")
         self.assert_reject(form(MEMBER, "General"), "form_authority")
-        self.assert_reject(form(OWNER, "Nope"), "unknown_section")
+
+    def test_owner_can_stage_form_before_section_rename(self):
+        # CommunityCreate publishes migration artifacts before the definition
+        # that introduces their destination section.
+        for mode in ("passthrough", "strict"):
+            with self.subTest(mode=mode):
+                cfg = config(BUDABIT_MODE=mode)
+                form = lambda pk: event(30168, pk, [["d", "apply-marketplace"], ["content", "Marketplace"]] + authority_tags())
+                outcome = self.assert_accept(form(OWNER), cfg=cfg)
+                self.assertFalse(outcome.authority)
+                self.assertIsNone(self.state.branch(ADDRESS).definition.section_named("Marketplace"))
+                for author in (MOD_GENERAL, MOD_CODE, MEMBER, OUTSIDER):
+                    self.assert_reject(form(author), "unknown_section", cfg=cfg)
+
+    def test_owner_staged_form_still_requires_section_and_exact_authority(self):
+        for content_tags in ([], [["content", ""]], [["content", "   "]]):
+            self.assert_reject(
+                event(30168, OWNER, [["d", "apply"]] + content_tags + authority_tags()),
+                "invalid_workflow_shape",
+            )
+        self.assert_reject(
+            event(30168, OWNER, [["d", "apply"], ["content", "Marketplace"], ["h", COMMUNITY]]),
+            "invalid_authority_tags",
+        )
+        self.assert_reject(
+            event(30168, OWNER, [["d", "apply"], ["content", "Marketplace"], ["h", COMMUNITY],
+                                ["a", f"32222:{OWNER}:{OTHER_COMMUNITY}", "", "community"]]),
+            "invalid_authority_tags",
+        )
+
+    def test_staging_form_does_not_use_owner_of_same_id_branch(self):
+        second = f"32222:{OUTSIDER}:{COMMUNITY}"
+        state = warm_state(
+            standard_events() + [definition(owner=OUTSIDER)], addresses=(ADDRESS, second)
+        )
+        form = event(30168, OWNER, [["d", "apply"], ["content", "Marketplace"]] + authority_tags(owner=OUTSIDER))
+        self.assert_reject(form, "unknown_section", state=state)
+
+    def test_banned_or_declined_moderator_cannot_publish_forms(self):
+        form = event(30168, MOD_GENERAL, [["d", "apply"], ["content", "General"]] + authority_tags())
+        self.assert_accept(form)
+        self.state.apply(shard(MOD_GENERAL, "general", [], shard_no=2, declined=True))
+        self.assert_reject(form, "form_authority")
+        self.state.apply(shard(MOD_GENERAL, "general", [], shard_no=2))
+        self.state.apply(person_report(OWNER, MOD_GENERAL))
+        self.assert_reject(form, "form_authority")
 
     def test_admission_response_open_to_outsiders(self):
         response = event(1069, OUTSIDER, [["a", f"30168:{MOD_GENERAL}:apply", "", "form"]] + authority_tags())
@@ -470,6 +515,44 @@ class StrictModeTests(RulesBase):
 
     def test_public_note_rejected(self):
         self.assert_reject(event(1, OUTSIDER, [], "x"), "strict_passthrough")
+
+    def test_owner_can_stage_unreferenced_migration_shard(self):
+        for shard_no in (None, 2):
+            staged = shard(OWNER, "marketplace", [OUTSIDER], shard_no=shard_no)
+            outcome = self.assert_accept(staged)
+            self.assertFalse(outcome.authority)
+            self.assertEqual(self.state.apply(staged), [])
+            self.assert_reject(thread(OUTSIDER), "no_grant")
+
+    def test_migration_shard_exception_is_owner_and_branch_specific(self):
+        for author in (MOD_GENERAL, MOD_CODE, MEMBER, OUTSIDER):
+            self.assert_reject(shard(author, "marketplace", [OUTSIDER]), "strict_passthrough")
+        self.assert_reject(shard(OWNER, "marketplace", [OUTSIDER], community=OTHER_COMMUNITY), "strict_passthrough")
+        # A same-id branch owned by someone else cannot authorize the signer.
+        second = f"32222:{OUTSIDER}:{COMMUNITY}"
+        state = warm_state([definition(owner=OUTSIDER)], addresses=(second,))
+        self.assert_reject(shard(OWNER, "marketplace", [MEMBER]), "strict_passthrough", state=state)
+
+    def test_migration_shard_requires_valid_unscoped_coordinate(self):
+        identifier = f"{COMMUNITY}-marketplace"
+        for tags in (
+            [], [["d"]], [["d", identifier, "extra"]],
+            [["d", identifier], ["d", identifier]],
+            [["d", f"{COMMUNITY}-"]], [["d", identifier + ".0"]],
+            [["d", identifier], ["h", COMMUNITY]],
+            [["d", identifier], ["a", ADDRESS, "", "community"]],
+        ):
+            with self.subTest(tags=tags):
+                self.assert_reject(event(30000, OWNER, tags + [["p", OUTSIDER]]), "strict_passthrough")
+
+    def test_migration_shard_waits_for_available_branch(self):
+        state = CommunityState([ADDRESS])
+        staged = shard(OWNER, "marketplace", [MEMBER])
+        self.assert_reject(staged, "warming_up", state=state)
+        state.branch(ADDRESS).warm = True
+        self.assert_reject(staged, "definition_unavailable", state=state)
+        state.apply(definition())
+        self.assert_accept(staged, state=state)
 
     def test_participant_personal_kinds(self):
         self.assert_accept(event(0, MEMBER, [], "{}"))
