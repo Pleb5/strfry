@@ -166,14 +166,24 @@ grant arranged outside this endpoint before retrieving its forms or definition.
 ## Independent DM and NIP-70 settings
 
 Kind4444 uses participant AUTH regardless of `readPolicy.plugin`, the optional
-restricted-kind list, or its involved-key toggle. Legacy kind4/1059 also remain
-protected. With AUTH disabled/unconfigured, DMs stay inaccessible, not public.
+restricted-kind list, or its involved-key toggle. Legacy kind4 also remains
+protected. With AUTH disabled/unconfigured, these kinds stay inaccessible, not public.
 Enable AUTH with the actual service URL to make them usable. Signed recipient tags
 govern participant access; this change does not validate or transform ciphertext.
 Malformed retained events are not made public: with no valid recipient, only the
 authenticated author can read them. Existing behavior treats any valid 32-byte
 `p` tag as a recipient, even if a historical event has more than one; no new
 single-recipient validation or rewrite of signed events is introduced here.
+
+Kind1059 encrypted envelopes have no mandatory participant or AUTH requirement.
+On a public relay they can be retrieved anonymously, including through mixed
+ContextVM subscriptions (`25910`, `1059`, `21059`). Explicit additional-kind
+restrictions and whole-relay admission still apply when configured.
+
+**Upgrade from b574d2b or earlier mandatory-1059 builds:** deploy the updated binary
+and remove `1059` from any explicit `relay.auth.restrictedReadKinds` list (the new
+default is `"4, 4444"`). A config-only edit cannot remove the old binary's mandatory
+restriction. Verify stored and live 1059 reads without AUTH after deployment.
 
 `relay.nip70.enabled=false` is the new default. It ignores protected-tag author-auth
 semantics and NIP-70 embedded-repost rejection, leaves signed events unchanged,

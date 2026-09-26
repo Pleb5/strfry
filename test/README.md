@@ -8,7 +8,13 @@ Tests should be run from the *root* of the project.
 
 ## Restricted read tests (REQ/COUNT/negentropy + ReadRestrictor logic):
 
-    node test/readRestrictTest.js
+    node test/tests/readRestrictTest.js
+    node test/tests/dm4444Test.js
+    node test/tests/giftWrapReadTest.js
+
+The gift-wrap tests cover anonymous stored and live kind-1059 delivery with the
+binary defaults, AUTH enabled/disabled, mixed ContextVM subscriptions, COUNT,
+Negentropy, and explicitly configured optional restrictions.
 
 ## Budabit write-control plugin (deploy/budabit):
 

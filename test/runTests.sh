@@ -25,6 +25,14 @@ node "./test/tests/readRestrictTest.js" \
   && pass "./test/tests/readRestrictTest.js" \
   || fail "./test/tests/readRestrictTest.js failed"
 
+node "./test/tests/dm4444Test.js" \
+  && pass "./test/tests/dm4444Test.js" \
+  || fail "./test/tests/dm4444Test.js failed"
+
+node "./test/tests/giftWrapReadTest.js" \
+  && pass "./test/tests/giftWrapReadTest.js" \
+  || fail "./test/tests/giftWrapReadTest.js failed"
+
 info "running budabit write-control plugin tests..."
 
 python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p "test_*.py" \

@@ -49,10 +49,10 @@ config:
     desc: "Maximum age of NIP-42 AUTH proofs, independent of ordinary ephemeral events (allows human signer approval)."
     default: 600
   - name: relay__auth__restrictedReadKinds
-    desc: "Additional AUTH-restricted kinds. DM kinds 4,1059,4444 always require an authenticated participant, even if omitted."
-    default: "4, 1059, 4444"
+    desc: "Additional AUTH-restricted kinds. Kinds 4/4444 always require an authenticated participant; kind 1059 is unrestricted by default."
+    default: "4, 4444"
   - name: relay__auth__restrictReadToInvolvedPubkey
-    desc: "Limit additional restricted kinds to event author/p-tag participants (always required for DM kinds 4,1059,4444). COUNT must be safely participant-scoped."
+    desc: "Limit additional restricted kinds to event author/p-tag participants (always required for DM kinds 4/4444). COUNT must be safely participant-scoped."
     default: true
 
   - name: relay__nip70__enabled

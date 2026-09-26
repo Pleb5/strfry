@@ -20,10 +20,12 @@ This fork also supports optional [plugin-owned whole-relay REQ admission](docs/p
 Community membership stays in the plugin, with eventually consistent periodic
 connection rechecks, not per-event community ACLs. See the
 [Budabit architecture and decisions](deploy/budabit/READ-CONTROL-PLAN.md) and
-[operator guide](deploy/budabit/PRIVATE-READS.md). Independently, kinds `4`, `1059`
-and `4444` always require an authenticated participant to read; disabling admission
-does not disable DM privacy. `relay.nip70.enabled` defaults to `false`: protection
-tags are preserved but their NIP-70 semantics are not enforced or advertised.
+[operator guide](deploy/budabit/PRIVATE-READS.md). Independently, kinds `4` and `4444`
+always require an authenticated participant to read. Kind `1059` encrypted envelopes
+are readable without AUTH by default; an explicit `restrictedReadKinds` entry or
+whole-relay admission can still restrict them. `relay.nip70.enabled` defaults to
+`false`: protection tags are preserved but their NIP-70 semantics are not enforced
+or advertised.
 These are source capabilities, not evidence that a deployed image has been upgraded.
 
 <hr>

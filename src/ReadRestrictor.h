@@ -26,13 +26,13 @@ public:
     }
     static void init(){
         parseCommaSeparatedKinds(cfg().relay__auth__restrictedReadKinds, restrictedKinds_);
-        // Baseline DM privacy is not an optional community/read-policy setting.
+        // Kinds 4/4444 require participant AUTH independently of community mode.
+        // Gift-wrap kind 1059 is public unless explicitly configured as restricted.
         restrictedKinds_.insert(4);
-        restrictedKinds_.insert(1059);
         restrictedKinds_.insert(4444);
     }
 
-    static bool participantOnly(uint64_t kind) { return kind == 4 || kind == 1059 || kind == 4444; }
+    static bool participantOnly(uint64_t kind) { return kind == 4 || kind == 4444; }
 
     static bool mayContainRestricted(const NostrFilterGroup &group) {
         for (const auto &filter : group.filters) {

@@ -6,7 +6,7 @@ import { fixture, owner, member, outsider, event } from "../utils/readAdmission.
 
 const f = await fixture({publicReads:true});
 try {
-  const dms = [4,1059,4444].map(kind=>event(owner,kind,[["p",member.pubkey]],`private-${kind}`));
+  const dms = [4,4444].map(kind=>event(owner,kind,[["p",member.pubkey]],`private-${kind}`));
   const other = event(outsider,4444,[["p",outsider.pubkey]],"other-private");
   const publicEvent = event(owner,1,[],"public");
   f.import([...dms,other,publicEvent]);
@@ -30,12 +30,12 @@ try {
   const anon = await f.connect();
   const broad = await f.read(anon);
   assert.deepEqual(broad.filter(m=>m[0]==="EVENT").map(m=>m[2].id),[publicEvent.id]);
-  const exact = await f.read(anon,{ids:[dms[2].id]});
+  const exact = await f.read(anon,{ids:[dms[1].id]});
   assert(!exact.some(m=>m[0]==="EVENT"));
   anon.send(["COUNT","broad-count",{}]);
   assert.equal((await anon.waitFor(m=>m[1]==="broad-count"))[0],"CLOSED");
   for (const who of [owner, member]) {
-    const c = await f.connect(who), results = await f.read(c,{kinds:[4,1059,4444]});
+    const c = await f.connect(who), results = await f.read(c,{kinds:[4,4444]});
     assert.deepEqual(new Set(results.filter(m=>m[0]==="EVENT").map(m=>m[2].id)),new Set(dms.map(e=>e.id)));
     c.send(["COUNT","dm-count",{kinds:[4444]}]);
     assert.equal((await c.waitFor(m=>m[1]==="dm-count"))[0],"CLOSED");
@@ -43,7 +43,7 @@ try {
     assert.equal((await c.waitFor(m=>m[1]==="own-count"))[2].count,1);
   }
   const stranger = await f.connect(outsider);
-  assert(!(await f.read(stranger,{ids:[dms[2].id]})).some(m=>m[0]==="EVENT"));
+  assert(!(await f.read(stranger,{ids:[dms[1].id]})).some(m=>m[0]==="EVENT"));
   const recipient = await f.connect(member);
   recipient.send(["REQ","live-dm",{kinds:[4444],limit:0}]);
   await recipient.waitFor(m=>m[0]==="EOSE" && m[1]==="live-dm");
@@ -57,7 +57,7 @@ try {
   const observed = await stranger.collectUntil(m=>m[0]==="EVENT" && m[2].id===sentinel.id);
   assert(!observed.some(m=>m[0]==="EVENT" && m[2].id===incoming.id));
 
-  console.log("PASS automatic 4444/legacy privacy with empty optional restrictions, history/ID/live/COUNT/NEG");
+  console.log("PASS automatic 4/4444 privacy with empty optional restrictions, history/ID/live/COUNT/NEG");
 } catch(error) { console.error(f.logs()); throw error; }
 finally { await f.stop(); }
 

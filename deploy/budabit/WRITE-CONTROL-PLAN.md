@@ -523,7 +523,8 @@ readiness inference.
   events with AUTH disabled; do not carry that historical behavior into source claims.
 - **Read admission and DMs:** `read-policy.py` uses independent storage scans and
   checks authenticated reader keys, not event-author write eligibility. Core DM
-  participant restrictions for `4`/`1059`/`4444` apply even when admission is off.
+  participant restrictions for `4`/`4444` apply even when admission is off. Kind
+  `1059` is unrestricted by default unless explicitly restricted or gated by admission.
 - **Kind 41** is treated as replaceable by this revision (runbook note);
   irrelevant to Communikeys but keep the retention test.
 

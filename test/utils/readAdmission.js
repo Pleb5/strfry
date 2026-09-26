@@ -27,7 +27,7 @@ export const grant = keys => event(owner, 30000, [["d", `${community}-general`],
 export const report = key => event(owner, 1984, [["h", community], ["a", branch, "", "community"], ["p", key.pubkey, "spam"]]);
 export const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 
-export async function fixture({ budabit = false, publicReads = false, authEnabled = true, port = 40582, extra = "", maxPending = 1024, recheckSeconds = 1, scanFailure = false } = {}) {
+export async function fixture({ budabit = false, publicReads = false, authEnabled = true, restrictedReadKinds = "", port = 40582, extra = "", maxPending = 1024, recheckSeconds = 1, scanFailure = false } = {}) {
   const work = mkdtempSync(path.join(os.tmpdir(), "strfry-admission-"));
   const db = path.join(work, "db"), config = path.join(work, "relay.conf"), control = path.join(work, "control.json"), calls = path.join(work, "calls.jsonl");
   const readPlugin = path.join(work, "read-plugin"), writePlugin = path.join(work, "write-plugin");
@@ -75,7 +75,7 @@ relay {
  maxFilterLimitCount = ${publicReads ? 100000 : 0}
  auth { enabled = ${authEnabled}
  serviceUrl = "${service}"
- restrictedReadKinds = ""
+ ${restrictedReadKinds === null ? "" : `restrictedReadKinds = ${JSON.stringify(restrictedReadKinds)}`}
  restrictReadToInvolvedPubkey = false }
  negentropy { enabled = ${publicReads} }
  readPolicy { plugin = "${publicReads ? "" : readPlugin}"
@@ -100,11 +100,12 @@ relay {
       const result = spawnSync("./strfry", ["--config", config, "import"], {env, input: events.map(JSON.stringify).join("\n") + "\n", encoding: "utf8"});
       assert.equal(result.status, 0, result.stderr);
     },
-    async connect(who) {
+    async connect(who, { requestChallenge = true } = {}) {
       const ws = new WebSocket(url), client = new WsClient(ws);
       clients.push(client);
       await once(ws, "open", {signal: AbortSignal.timeout(4000)});
       if (!authEnabled) { assert(!who); return client; }
+      if (publicReads && !who && !requestChallenge) return client;
       if (publicReads) client.send(["REQ", "challenge", {kinds: [4444]}]);
       client.challenge = (await client.waitFor(m => m[0] === "AUTH"))[1];
       if (who) await api.auth(client, who);

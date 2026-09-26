@@ -113,7 +113,7 @@ def validate(values, env):
     require(set(claim) <= {"version", "mode", "scope", "unfiltered_kinds"}, "unexpected private metadata")
     kinds = claim.get("unfiltered_kinds", [])
     require(isinstance(kinds, list) and all(type(kind) is int for kind in kinds) and set(kinds) == UNFILTERED, "declare authority/text completeness kinds")
-    restricted = {int(value.strip()) for value in values.get("relay.auth.restrictedReadKinds", "4,1059,4444").split(",") if value.strip()}
+    restricted = {int(value.strip()) for value in values.get("relay.auth.restrictedReadKinds", "4,4444").split(",") if value.strip()}
     if values.get("relay.auth.restrictReadToInvolvedPubkey", True):
         require(not restricted & UNFILTERED, "unfiltered metadata conflicts with event restrictions")
     return True

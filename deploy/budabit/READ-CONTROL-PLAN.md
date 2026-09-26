@@ -134,9 +134,11 @@ not part of this replacement.
 
 ## Independent privacy and client behavior
 
-Kind `4444` and retained kinds `4`/`1059` participant privacy are mandatory independently of
-community mode. COUNT must be safely participant-scoped; shared Negentropy trees
-are bypassed when results may include restricted events. Community mode disables
+Kind `4444` and retained kind `4` participant privacy are mandatory independently of
+community mode. Kind `1059` is unrestricted by default; explicit additional-kind
+restrictions and whole-relay admission still apply. Restricted COUNT must be safely
+participant-scoped; shared Negentropy trees are bypassed when results may include
+restricted events. Community mode disables
 COUNT/Negentropy entirely. NIP-70 is a separate default-off switch.
 
 Budabit's consolidated client (`d78c6a5d8`) uses **relay-only read protection**.

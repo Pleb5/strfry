@@ -137,10 +137,11 @@ When a user's `REQ` is being processed for the initial "old" data, each `Filter`
 Once this completes, a scan begins for the next item in the filter field. Note that a filter only ever uses one index. If a filter specifies both `ids` and `authors`, only the `ids` index will be scanned. The `authors` filters will be applied when the whole filter is matched prior to sending.
 
 `ReadRestrictor` independently filters restricted events after query limits. In this
-fork, kinds `4`, `1059` and `4444` always require an authenticated author or valid
-`p`-tag participant, even when community admission is off. Therefore EOSE plus fewer
-received events than the limit does not by itself prove an exhaustive query. The
-Budabit private reader separates authority/text filters and requires explicit
+fork, kinds `4` and `4444` always require an authenticated author or valid
+`p`-tag participant, even when community admission is off. Kind `1059` has no default
+read restriction; explicit kind restrictions and whole-relay admission still apply.
+Therefore EOSE plus fewer received events than the limit does not by itself prove
+an exhaustive query. The Budabit private reader separates authority/text filters and requires explicit
 unfiltered-kind coverage rather than treating inaccessible DMs as missing authority.
 
 An important property of `DBScan` is that queries can be paused and resumed with minimal overhead. This allows us to ensure that long-running queries don't negatively affect the latency of short-running queries. When ReqWorker first receives a query, it creates a DBScan for it. The scan will be run with a "time budget" (for example 10 milliseconds). If this is exceeded, the query is put to the back of a queue and new queries are checked for. This means that new queries will always be processed before resuming any queries that have already run for 10ms.

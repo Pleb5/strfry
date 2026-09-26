@@ -193,8 +193,11 @@ The signed `read-access=members` tag is metadata, not relay configuration or a
 downstream confidentiality guarantee. Whole-relay admission adds no public
 discovery/application read exemption; arrange initial grants out of band as needed.
 
-Independently, kind4444 (and retained kind4/1059) reads always require an authenticated
+Independently, kind4444 (and retained kind4) reads always require an authenticated
 participant, even with community admission off or optional kind restrictions empty.
+Kind1059 envelopes are readable without AUTH on public relays by default. Upgrades
+must also remove 1059 from any explicit `restrictedReadKinds` configuration to use
+that default; see [the migration notes](PRIVATE-READS.md#independent-dm-and-nip-70-settings).
 NIP-70 now defaults off: ignore its protection semantics, preserve signed tags and
 all unrelated rules, and do not advertise NIP-70 unless enabled explicitly.
 

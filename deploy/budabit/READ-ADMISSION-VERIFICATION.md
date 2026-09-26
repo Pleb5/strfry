@@ -39,7 +39,7 @@ history or isolated worktree. Comparison baselines:
 | Strict snapshot/gate tests | Replaced by tests for the new contract, not carried forward as evidence of commit-atomic revocation |
 | Deployment / metadata | Retained local-checkout Docker provenance; replaced artifact health with config/advertisement and separate scan checks; versioned eventual-admission capability |
 | Client retry / completeness | Denial disposes sockets; explicit retry authenticates anew. Separate bounded authority/text intake and unfiltered-kind evidence retained |
-| DM / NIP-70 | Independent participant privacy for 4444/retained 4/1059; separate default-off NIP-70 semantics |
+| DM / NIP-70 | Independent participant privacy for 4444/retained 4; 1059 unrestricted by default; separate default-off NIP-70 semantics |
 
 ## Server checks
 
