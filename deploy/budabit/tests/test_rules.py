@@ -508,6 +508,112 @@ class WrapperRuleTests(RulesBase):
         self.assert_reject(ev, "no_grant", state=state)
 
 
+class CalendarGrantTests(RulesBase):
+    def calendar_state(self, kinds=(31922,), split=False, grant=True):
+        sections = [
+            ("General", [["k", "1111"]], [shard_address(MOD_GENERAL, "general")]),
+        ]
+        if split:
+            sections += [
+                ("All-day events", [["k", "31922"]], [shard_address(OWNER, "date")]),
+                ("Timed events", [["k", "31923"]], [shard_address(OWNER, "time")]),
+            ]
+            grants = [shard(OWNER, "date", [MEMBER]), shard(OWNER, "time", [MEMBER2])]
+        else:
+            if kinds:
+                sections.append(("Calendar", [["k", str(k)] for k in kinds], [shard_address(OWNER, "calendar")]))
+            grants = [shard(OWNER, "calendar", [MEMBER])]
+        return warm_state([
+            definition(sections=sections),
+            shard(MOD_GENERAL, "general", [OUTSIDER]),
+            *(grants if grant else []),
+        ])
+
+    def publications(self, pubkey):
+        for kind in (31922, 31923):
+            yield event(kind, pubkey, [["d", "cal"], ["h", COMMUNITY]])
+            yield event(kind, pubkey, [["d", "cal"]] + authority_tags())
+            yield event(30222, pubkey, [
+                ["d", "targeting"], ["k", str(kind)],
+                ["a", f"{kind}:{pubkey}:cal"], ["h", COMMUNITY], ["a", ADDRESS, RELAY],
+            ])
+
+    def test_either_calendar_grant_admits_both_kinds(self):
+        for kinds, split in (((31922,), False), ((31923,), False), ((31922, 31923), False), ((31922, 31923), True)):
+            state = self.calendar_state(kinds, split=split)
+            for author in (OWNER, MOD_GENERAL, MEMBER, *([MEMBER2] if split else [])):
+                for ev in self.publications(author):
+                    with self.subTest(kinds=kinds, split=split, author=author, kind=ev["kind"]):
+                        self.assert_accept(ev, state=state)
+            # A grant in General does not grant calendar access.
+            for ev in self.publications(OUTSIDER):
+                self.assert_reject(ev, "no_grant", state=state)
+            self.assert_reject(thread(MEMBER), "kind_not_enabled", state=state)
+            self.assert_reject(event(9041, MEMBER, [["h", COMMUNITY], ["d", "goal"]]), "kind_not_enabled", state=state)
+
+    def test_calendar_still_requires_an_enabled_section(self):
+        state = self.calendar_state(kinds=())
+        for ev in self.publications(OWNER):
+            self.assert_reject(ev, "no_grant" if ev["kind"] == 30222 else "kind_not_enabled", state=state)
+
+    def test_missing_declined_revoked_and_deleted_calendar_grants(self):
+        for kind in (31922, 31923):
+            missing = self.calendar_state((kind,), grant=False)
+            for ev in self.publications(MEMBER):
+                self.assert_reject(ev, "no_grant", state=missing)
+            for update in (
+                lambda: shard(OWNER, "calendar", []),
+                lambda: shard(OWNER, "calendar", [MEMBER], declined=True),
+                lambda: tombstone(OWNER, shard_address(OWNER, "calendar")),
+            ):
+                state = self.calendar_state((kind,))
+                for ev in self.publications(MEMBER):
+                    self.assert_accept(ev, state=state)
+                state.apply(update())
+                for ev in self.publications(MEMBER):
+                    self.assert_reject(ev, "no_grant", state=state)
+
+    def test_person_ban_overrides_both_calendar_grants(self):
+        state = self.calendar_state(split=True)
+        for author in (MEMBER, MOD_GENERAL):
+            state.apply(person_report(OWNER, author))
+            for ev in self.publications(author):
+                self.assert_reject(ev, "person_banned", state=state)
+        for ev in self.publications(MEMBER2):
+            self.assert_accept(ev, state=state)
+
+    def test_strict_originals_use_either_calendar_grant(self):
+        cfg = config(BUDABIT_MODE="strict")
+        for granted_kind in (31922, 31923):
+            state = self.calendar_state((granted_kind,))
+            for kind in (31922, 31923):
+                for author in (OWNER, MOD_GENERAL, MEMBER):
+                    self.assert_accept(event(kind, author, [["h", "targeting"], ["d", "cal"]]), state=state, cfg=cfg)
+                self.assert_reject(event(kind, OUTSIDER, [["h", "targeting"], ["d", "cal"]]), "strict_passthrough", state=state, cfg=cfg)
+            state.apply(person_report(OWNER, MEMBER))
+            for kind in (31922, 31923):
+                self.assert_reject(event(kind, MEMBER, [["h", "targeting"], ["d", "cal"]]), "strict_passthrough", state=state, cfg=cfg)
+
+    def test_cross_kind_grant_preserves_censored_address_check(self):
+        state = self.calendar_state()
+        ev = event(31923, MEMBER, [["h", COMMUNITY], ["d", "cal"]])
+        state.apply(event_report(OWNER, MEMBER, ev["id"], section="Calendar", target_address=f"31923:{MEMBER}:cal"))
+        self.assert_accept(ev, state=state)
+        self.assert_reject(ev, "censored_address", state=state, cfg=config(BUDABIT_REJECT_CENSORED_ADDRESSES="1"))
+
+    def test_calendar_grant_does_not_transfer_between_hosted_targets(self):
+        second = f"32222:{OUTSIDER}:{OTHER_COMMUNITY}"
+        state = self.calendar_state()
+        state.add_branch(second)
+        state.apply(definition(owner=OUTSIDER, community=OTHER_COMMUNITY, sections=[("Calendar", [["k", "31923"]], [])]))
+        state.branch(second).warm = True
+        ev = list(self.publications(MEMBER))[-1]
+        self.assert_accept(ev, state=state)
+        ev["tags"] += [["h", OTHER_COMMUNITY], ["a", second, RELAY]]
+        outcome = self.assert_reject(ev, "no_grant", state=state)
+        self.assertEqual(outcome.community_id, OTHER_COMMUNITY)
+
+
 class StrictModeTests(RulesBase):
     def setUp(self):
         super().setUp()

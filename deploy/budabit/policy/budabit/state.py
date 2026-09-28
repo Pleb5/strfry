@@ -22,6 +22,8 @@ INLINE_GRACE_SECONDS = 60.0
 from .reports import AuthorityView, compute_report_state
 from .selection import Coordinate
 
+CALENDAR_KINDS = (31922, 31923)
+
 
 class Branch:
     def __init__(self, owner, community_id):
@@ -389,13 +391,28 @@ class Derived:
             return True
         return pubkey in self.section_grants.get(section.name_key, set())
 
-    def can_write(self, pubkey, kind, subtype=None):
+    def write_sections(self, kind, subtype=None):
+        """Resolve publication grants; either calendar kind admits both formats.
+
+        Keep Definition.section_for exact for section-specific moderation and
+        workflow authority. Calendar publication mirrors the client's
+        canWriteCommunityCalendarTarget, including separately configured sections.
+        """
         if self.definition is None:
-            return False
+            return []
+        if kind in CALENDAR_KINDS and protocol.normalize_subtype(subtype) is None:
+            return [
+                section for section in self.definition.sections
+                if any(section.supports(calendar_kind) for calendar_kind in CALENDAR_KINDS)
+            ]
         section = self.definition.section_for(kind, subtype)
-        if section is None:
-            return False
-        return self.can_write_section(pubkey, section)
+        return [section] if section is not None else []
+
+    def can_write(self, pubkey, kind, subtype=None):
+        return any(
+            self.can_write_section(pubkey, section)
+            for section in self.write_sections(kind, subtype)
+        )
 
     def has_any_role(self, pubkey):
         """Participant of any kind: owner, structural member, moderator, or grantee."""

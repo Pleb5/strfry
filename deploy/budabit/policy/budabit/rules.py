@@ -125,9 +125,9 @@ def _availability(branch, derived):
 
 
 def _section_rule(event, derived, pubkey, kind, subtype, community_id, config):
-    section = derived.definition.section_for(kind, subtype)
+    sections = derived.write_sections(kind, subtype)
     label = f"{kind}/{subtype}" if subtype else str(kind)
-    if section is None:
+    if not sections:
         return _reject(
             f"blocked: kind {label} is not enabled in community {_short(community_id)}",
             "kind_not_enabled",
@@ -135,9 +135,10 @@ def _section_rule(event, derived, pubkey, kind, subtype, community_id, config):
         )
     if derived.is_banned(pubkey):
         return _banned(community_id)
-    if not derived.can_write_section(pubkey, section):
+    if not any(derived.can_write_section(pubkey, section) for section in sections):
+        names = '", "'.join(section.name for section in sections)
         return _reject(
-            f'blocked: not a current writer for section "{section.name}" in {_short(community_id)}',
+            f'blocked: not a current writer for section "{names}" in {_short(community_id)}',
             "no_grant",
             community_id,
         )

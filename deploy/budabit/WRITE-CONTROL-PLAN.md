@@ -193,6 +193,16 @@ default modes alike, because Budabit will never render it under this
 branch). Kinds handled by dedicated workflow rules in §3.5 are exempt from
 this section lookup.
 
+Calendar publication is an explicit exception: a write grant for either
+`(31922, ∅)` (date-based) or `(31923, ∅)` (time-based) admits **both** event
+formats. Resolve the union of those sections, whether the definition lists
+one kind, both in a common section, or each in a separate section. At least
+one calendar section must exist and admit the author under §3.4. This mirrors
+Budabit's `canWriteCommunityCalendarTarget` and targeting-event admission.
+It applies to direct community events, `30222` wrappers, and strict-mode
+targetable originals; section-specific moderation and workflow authority
+still resolve the exact declared section.
+
 ### 3.4 Writer set and person bans
 
 For a resolved section, an author may write when (mirrors
@@ -253,7 +263,7 @@ branch: `owner`, `moderator(S)` (grant-capable for section S),
 | 7 admission review | `e` with marker `response`, `k=1069`, form `a`, `content` tag = S, `h` + marked `a` | owner or moderator(S) | Other `kind:7` fall through to the section rule for `(7, ∅)`. |
 | 7 moderator-request decision | `e` to a 30000 request, `k=30000`, `h` + marked `a` | owner | |
 | 30009 / 8 badges | `h` + marked `a` | owner or moderator(any) | Badges are endorsements; issuance is delegated. |
-| 30222 wrapper | Closed grammar (3.2) | For each hosted pair: author has grant for `(k, ∅)` in that branch | Implicit-original rule (same author, `h = d`) is checked by clients, not the relay. |
+| 30222 wrapper | Closed grammar (3.2) | For each hosted pair: author has grant for `(k, ∅)` in that branch, or either calendar grant for `k=31922/31923` | Implicit-original rule (same author, `h = d`) is checked by clients, not the relay. |
 | 30617 repo announcement | exactly one `h` = communityId | section rule (`Code-curator`) | Repos are directly bound; no wrapper. |
 | 11 / 9 / 1111 / 7 / 1985 / 31922 / 31923 / 9041 / 1623 / 30033 with `h` = communityId | exactly one `h` | section rule (3.3, 3.4) | Targetable originals normally carry a targeting id in `h`, not the communityId; they are passthrough unless the community id is used directly. |
 | stars/bookmarks (`h` + marked `a`, no community `p`) | | R ≠ banned | User preference events. |
@@ -289,8 +299,9 @@ In strict mode (`BUDABIT_MODE=strict`) passthrough traffic is rejected with
   `d` of the form `<communityId>-<purpose>[.<shard>]`, no `h` or marked community
   `a`, and remain non-authoritative until the definition references them.
 - Targetable originals (`31922, 31923, 9041, 1623, 30033`) whose author has
-  the corresponding grant in at least one hosted branch (they are published
-  to community relays alongside their wrapper).
+  the corresponding grant in at least one hosted branch (either calendar
+  grant for `31922/31923`; they are published to community relays alongside
+  their wrapper).
 
 NIP-34 repository kinds get no carve-out. A `kind:30617` announcement with
 `h=<communityId>` is community content and follows the section rule (the

@@ -105,6 +105,13 @@ for the expected exact addresses, valid/warm definitions, and missing shards:
 `--check-policy` can succeed with no auto-discovered branches and does not
 guarantee that every referenced permission list is present.
 
+Calendar publication accepts either calendar grant (`31922` date-based or
+`31923` time-based) for both event formats, matching the Budabit client. This
+also covers definitions with only one calendar kind or two separate calendar
+sections, direct community events, targeting wrappers, and strict-mode
+originals. Bans and current-list revocations still apply. The source fix
+requires a relay policy deployment to affect the running service.
+
 In the fixed source, every plugin instance temporarily rejects new writes until
 its complete initial load succeeds, even in dry-run. Initial failures retry with
 bounded backoff; unrelated passthrough and normal bootstrap resume after loading.

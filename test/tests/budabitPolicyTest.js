@@ -193,9 +193,17 @@ const definitionTags = (section = "Thread-creator", purpose = "thread-creator") 
   ["k", "11", "threads"],
   ["a", shardAddress(owner, purpose)],
   ["a", shardAddress(moderator, purpose)],
+  ["content", "Calendar"],
+  ["k", "31922"],
+  ["a", shardAddress(owner, "calendar")],
 ];
 
 const thread = (who) => [who, 11, [["h", communityId]], "thread"];
+const timedCalendarWrapper = (who) => [who, 30222, [
+  ["d", "timed-calendar-target"], ["k", "31923"],
+  ["a", `31923:${who.pub}:timed-calendar`],
+  ["h", communityId], ["a", address, "wss://relay.test"],
+]];
 const form = (who, section, identifier) => sign(who, 30168, [
   ["d", identifier], ...authority(), ["content", section],
   ["name", `${section} application`], ["field", "intro", "text", "Introduction"],
@@ -252,6 +260,30 @@ async function main() {
       "outsider comment still needs General",
     );
 
+    console.log("* date-only calendar grant admits timed events");
+    expectAccepted(await publish(client, sign(...timedCalendarWrapper(owner))), "owner timed wrapper with date-only definition");
+    expectBlocked(await publish(client, sign(...timedCalendarWrapper(outsider))), "blocked: no current grant", "thread access does not grant calendar access");
+    expectAccepted(
+      await publish(client, sign(owner, 30000, [["d", `${communityId}-calendar`], ["p", outsider.pub]])),
+      "calendar grant accepted",
+    );
+    const calendarOriginal = sign(outsider, 31923, [
+      ["d", "timed-calendar"], ["h", "timed-calendar-target"],
+      ["title", "Timed event"], ["start", String(ts + 3600)],
+    ]);
+    const calendarWrapper = sign(...timedCalendarWrapper(outsider));
+    const calendarDirect = sign(outsider, 31923, [
+      ["d", "timed-direct"], ["h", communityId],
+      ["title", "Direct timed event"], ["start", String(ts + 3600)],
+    ]);
+    for (const candidate of [calendarOriginal, calendarWrapper, calendarDirect]) {
+      expectAccepted(await publish(client, candidate), `calendar publication kind ${candidate.kind}`);
+      expect((await count(client, { ids: [candidate.id] })) === 1, `calendar kind ${candidate.kind} stored exactly`);
+    }
+    expectAccepted(await publish(client, sign(owner, 30000, [["d", `${communityId}-calendar`]])), "calendar grant revoked");
+    expectBlocked(await publish(client, sign(...timedCalendarWrapper(outsider))), "blocked: no current grant", "revoked calendar grant rejects timed wrapper immediately");
+    expectAccepted(await publish(client, sign(owner, 30000, [["d", `${communityId}-calendar`], ["p", outsider.pub]])), "calendar grant restored");
+
     console.log("* structural member and moderator");
     expectAccepted(await publish(client, sign(...thread(moderator))), "referenced list owner writes before accepting");
     expectAccepted(
@@ -268,6 +300,7 @@ async function main() {
     const report = sign(owner, 1984, [["p", outsider.pub, "spam"], ...authority()]);
     expectAccepted(await publish(client, report), "owner person report");
     expectBlocked(await publish(client, sign(...thread(outsider))), "blocked: author is moderated", "banned outsider rejected");
+    expectBlocked(await publish(client, sign(...timedCalendarWrapper(outsider))), "blocked: author is moderated", "ban overrides cross-kind calendar grant");
 
     // Current Budabit shape: h scope only, no a tag (Communikeys "Deletion Requests").
     const reportDelete = sign(owner, 5, [
@@ -346,6 +379,7 @@ async function main() {
     await waitForRelay(wsUrl);
     client = new WsClient(await openWebSocket(wsUrl));
     expectAccepted(await publishRetryWhileLoading(client, ...thread(outsider)), "outsider thread after restart");
+    expectAccepted(await publish(client, sign(...timedCalendarWrapper(outsider))), "cross-kind calendar grant survives restart");
     expect((await count(client, { ids: [migratedForm.id] })) === 1, "copied form survives restart");
     expectAccepted(await publish(client, form(moderator, "Marketplace", "mod-marketplace")), "migrated moderator authority survives restart");
     expectBlocked(
