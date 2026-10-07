@@ -80,6 +80,18 @@ qualifying definitions enroll a new branch; unrelated or malformed new
 definitions do not activate hosting. Normal signature, storage, and rate
 checks still apply to passthrough traffic.
 
+Kind `1063` NIP-94/Blossom descriptors require an eligible signed author in both
+passthrough and strict modes: owner, structural member, moderator or grantee in any
+section, excluding effectively banned authors. No dedicated `1063` section/grant
+is needed. Unscoped descriptors require membership in any available, warm hosted
+branch; explicitly hosted community-scoped descriptors use that branch's membership.
+Nonmembers cannot publish descriptors through unscoped/unhosted passthrough.
+Descriptors are publicly readable, including in members mode when the supplied
+`readPolicy.publicKinds = "1063"` setting is used. Anonymous/nonmember clients must
+explicitly request `kinds: [1063]`; mixed/private and ID-only REQs still need admission.
+Deploy the updated write plugin and, for members-mode public reads, the updated
+binary/configuration with a restart.
+
 While enabled, the stage rejects kind-5 requests tagging 32222/30000 through `k`
 or `a`, including owner requests and unhosted coordinates. E-only targets currently
 held as definitions/shards are protected too. The reply is
@@ -151,6 +163,7 @@ node test/tests/budabitStartupTest.js # actual cold auto-host / reload / failure
 node test/tests/authMaxAgeTest.js     # dedicated AUTH age and normal-event regression
 node test/tests/readAdmissionTest.js # real core, generic fixture plugin
 node test/tests/budabitReadAdmissionTest.js # real core + Python membership + LMDB
+node test/tests/fileMetadataTest.js # member-only descriptor writes, public stored/live reads
 node test/tests/dm4444Test.js # independent DM participant privacy
 node test/tests/nip70Test.js # default-off NIP-70 switch
 ```
@@ -171,7 +184,7 @@ The preset requires enforcing write control, no auto-host/dry-run, AUTH with an
 exact service URL, COUNT=0 and disabled Negentropy. The Python flag alone does not
 restrict the relay. Missing/broken configured plugins never permit reads.
 
-Valid AUTH receives OK true. Each REQ then gets one plugin membership decision
+Valid AUTH receives OK true. Each membership-protected REQ then gets one plugin membership decision
 before a query or live subscription is installed. Nonmembers receive CLOSED with
 `restricted:` and are disconnected. Active connections are rechecked every five
 seconds through the same plugin; no per-event community checks. Retry after a

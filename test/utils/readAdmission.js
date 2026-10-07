@@ -27,7 +27,7 @@ export const grant = keys => event(owner, 30000, [["d", `${community}-general`],
 export const report = key => event(owner, 1984, [["h", community], ["a", branch, "", "community"], ["p", key.pubkey, "spam"]]);
 export const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 
-export async function fixture({ budabit = false, publicReads = false, authEnabled = true, restrictedReadKinds = "", port = 40582, extra = "", maxPending = 1024, recheckSeconds = 1, scanFailure = false } = {}) {
+export async function fixture({ budabit = false, writeMode = "passthrough", publicReads = false, publicKinds = budabit ? "1063" : "", authEnabled = true, restrictedReadKinds = "", port = 40582, extra = "", maxPending = 1024, recheckSeconds = 1, scanFailure = false } = {}) {
   const work = mkdtempSync(path.join(os.tmpdir(), "strfry-admission-"));
   const db = path.join(work, "db"), config = path.join(work, "relay.conf"), control = path.join(work, "control.json"), calls = path.join(work, "calls.jsonl");
   const readPlugin = path.join(work, "read-plugin"), writePlugin = path.join(work, "write-plugin");
@@ -36,7 +36,7 @@ export async function fixture({ budabit = false, publicReads = false, authEnable
   let child, logs = "", nextSub = 0;
   mkdirSync(db);
   const env = { ...process.env, BUDABIT_READ_CONTROL: "members", BUDABIT_BRANCHES: branch,
-    BUDABIT_AUTO_HOST_URL: "", BUDABIT_DRY_RUN: "0", BUDABIT_DISABLE_LOADER: "0",
+    BUDABIT_AUTO_HOST_URL: "", BUDABIT_MODE: writeMode, BUDABIT_DRY_RUN: "0", BUDABIT_DISABLE_LOADER: "0",
     BUDABIT_STRFRY_BIN: path.resolve("strfry"), STRFRY_CONFIG: config,
     STRFRY_POLICY_DB_FILE: path.join(db, "data.mdb"), STRFRY_POLICY_MIN_FREE_BYTES: "0",
     BUDABIT_READ_REFRESH_SECONDS: "0.1", BUDABIT_READ_MAX_AGE_SECONDS: "3", BUDABIT_READ_SCAN_TIMEOUT_SECONDS: "2",
@@ -78,7 +78,8 @@ relay {
  ${restrictedReadKinds === null ? "" : `restrictedReadKinds = ${JSON.stringify(restrictedReadKinds)}`}
  restrictReadToInvolvedPubkey = false }
  negentropy { enabled = ${publicReads} }
- readPolicy { plugin = "${publicReads ? "" : readPlugin}"
+  readPolicy { plugin = "${publicReads ? "" : readPlugin}"
+  publicKinds = ${JSON.stringify(publicKinds)}
  recheckSeconds = ${recheckSeconds}
  timeoutSeconds = 2
  maxPending = ${maxPending} }

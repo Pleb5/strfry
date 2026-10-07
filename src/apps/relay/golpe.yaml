@@ -11,6 +11,10 @@ config:
     desc: "Total admission queue and RPC deadline in seconds"
     default: 2
     noReload: true
+  - name: relay__readPolicy__publicKinds
+    desc: "Comma-separated kinds exempt from REQ membership admission when every filter explicitly selects only these kinds; other read restrictions still apply"
+    default: ""
+    noReload: true
   - name: relay__readPolicy__recheckSeconds
     desc: "Recheck active connections through the plugin at this interval"
     default: 5

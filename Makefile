@@ -41,3 +41,4 @@ build/subid_tests: test/tests/SubIdTests.cpp build/golpe.h
 test-read-admission: $(BIN)
 	node test/tests/readAdmissionTest.js
 	node test/tests/budabitReadAdmissionTest.js
+	node test/tests/fileMetadataTest.js

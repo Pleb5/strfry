@@ -53,12 +53,22 @@ class ReadAdmissionPreflightTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 preflight.parse_config(text)
 
+    def test_only_file_metadata_can_be_public_in_budabit_preset(self):
+        values = {**self.values, "relay.readPolicy.publicKinds": "1063"}
+        self.assertTrue(preflight.validate(values, self.env))
+        for kinds in ("1,1063", "4444", "bad", "1_063", "1063junk", 1063):
+            with self.subTest(kinds=kinds), self.assertRaises(ValueError):
+                preflight.validate({**values, "relay.readPolicy.publicKinds": kinds}, self.env)
+        with self.assertRaises(ValueError):
+            preflight.validate({**values, "relay.auth.restrictedReadKinds": "1063"}, self.env)
+
     def test_advertisement_requires_generic_enforcement_and_specific_policy(self):
         core = {"version": 1, "admission": "req", "consistency": "eventual", "recheck_seconds": 5}
         info = {"limitation": {"auth_required": True}, "budabit": {"read_control": self.claim}, "read_policy": core}
         for value, succeeds in [(info, True), ({}, False), ([], False),
                                 ({**info, "read_policy": {}}, False), ({**info, "limitation": {}}, False),
                                 ({**info, "read_policy": {**core, "recheck_seconds": True}}, False),
+                                ({**info, "read_policy": {**core, "public_kinds": [1063]}}, False),
                                 ({**info, "budabit": {"read_control": {**self.claim, "version": 1}}}, False)]:
             with patch.object(preflight.urllib.request, "build_opener") as factory:
                 factory.return_value.open.return_value = io.BytesIO(json.dumps(value).encode())
@@ -67,3 +77,16 @@ class ReadAdmissionPreflightTests(unittest.TestCase):
                 else:
                     with self.assertRaises(ValueError):
                         preflight.check_advertisement("http://127.0.0.1/", True)
+
+    def test_public_kind_advertisement_must_match_configuration(self):
+        core = {"version": 1, "admission": "req", "consistency": "eventual", "recheck_seconds": 5}
+        for kinds in (None, [], [1063], [1, 1063], [True], "1063"):
+            info = {"limitation": {"auth_required": True}, "budabit": {"read_control": self.claim},
+                    "read_policy": {**core, "public_kinds": kinds}}
+            with patch.object(preflight.urllib.request, "build_opener") as factory:
+                factory.return_value.open.return_value = io.BytesIO(json.dumps(info).encode())
+                if kinds == [1063]:
+                    preflight.check_advertisement("http://127.0.0.1/", True, {1063})
+                else:
+                    with self.assertRaises(ValueError):
+                        preflight.check_advertisement("http://127.0.0.1/", True, {1063})

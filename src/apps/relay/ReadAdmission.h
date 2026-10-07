@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <condition_variable>
 #include <list>
 #include <map>
@@ -16,7 +17,7 @@
 // There are no database revisions, reader rosters, or per-event policy checks.
 struct ReadAdmission {
     using Clock = std::chrono::steady_clock;
-    struct Entry { uint64_t token; bool admitted = false; };
+    struct Entry { uint64_t token; bool admitted = false; bool requiresPolicy = true; };
     struct Connection {
         AuthKeys keys;
         uint64_t authGeneration = 0;
@@ -24,6 +25,15 @@ struct ReadAdmission {
         uint64_t checkId = 0;
         std::map<std::string, Entry> subs;
         Clock::time_point nextCheck = Clock::time_point::max();
+        bool hasPolicySubs() const {
+            return std::any_of(subs.begin(), subs.end(), [](const auto &entry) { return entry.second.requiresPolicy; });
+        }
+        void clearIdleCheck() {
+            if (!hasPolicySubs()) {
+                nextCheck = Clock::time_point::max();
+                checkId = 0; // invalidate rechecks after the last private sub is removed/replaced
+            }
+        }
     };
     struct Job {
         uint64_t id, connId, authGeneration;
@@ -35,6 +45,7 @@ struct ReadAdmission {
 
     bool enabled = false;
     std::string plugin, serviceUrl, restrictedKinds;
+    flat_hash_set<uint64_t> publicKinds;
     bool restrictInvolved = true;
     uint64_t timeout = 2, interval = 5, maxPending = 1024, maxConnections = 4096, maxSubs = 200, filterLimit = 0;
     std::function<void(Subscription &&)> onAdmit;
@@ -52,12 +63,33 @@ struct ReadAdmission {
         { std::lock_guard lock(mutex); stopping = true; changed.notify_all(); }
         if (worker.joinable()) worker.join();
     }
+    void configurePublicKinds(std::string_view text) {
+        publicKinds.clear();
+        while (!text.empty()) {
+            auto comma = text.find(',');
+            auto token = text.substr(0, comma);
+            auto first = token.find_first_not_of(" \t\r\n");
+            if (first != std::string_view::npos) {
+                token = token.substr(first, token.find_last_not_of(" \t\r\n") - first + 1);
+                uint64_t kind = 0;
+                auto [end, error] = std::from_chars(token.data(), token.data() + token.size(), kind);
+                // This is an authorization allowlist: never accept a numeric
+                // prefix (e.g. "1_063" as kind 1), signs, or overflowing values.
+                if (error != std::errc{} || end != token.data() + token.size())
+                    throw herr("invalid readPolicy.publicKinds: expected unsigned decimal kinds");
+                publicKinds.insert(kind);
+            }
+            if (comma == std::string_view::npos) break;
+            text.remove_prefix(comma + 1);
+        }
+    }
     void configure() {
         if (cfg().relay__readControl__enabled)
             throw herr("readControl was replaced; configure readPolicy.plugin before restarting");
         plugin = cfg().relay__readPolicy__plugin;
         enabled = !plugin.empty();
         if (!enabled) return;
+        configurePublicKinds(cfg().relay__readPolicy__publicKinds);
         serviceUrl = cfg().relay__auth__serviceUrl;
         restrictedKinds = cfg().relay__auth__restrictedReadKinds;
         restrictInvolved = cfg().relay__auth__restrictReadToInvolvedPubkey;
@@ -133,10 +165,7 @@ struct ReadAdmission {
         if (it != connections.end()) {
             auto &conn = it->second;
             conn.subs.erase(sub);
-            if (conn.subs.empty()) {
-                conn.nextCheck = Clock::time_point::max();
-                conn.checkId = 0; // invalidate a recheck for the previous active period
-            }
+            conn.clearIdleCheck();
         }
         eraseJobs(id, &sub);
     }
@@ -146,8 +175,18 @@ struct ReadAdmission {
         conn.closing = true; conn.subs.clear(); eraseJobs(id);
         return rejection;
     }
-    void request(Subscription sub) {
+    bool isPublic(const NostrFilterGroup &group) const {
+        if (publicKinds.empty() || group.filters.empty()) return false;
+        for (const auto &filter : group.filters) {
+            if (!filter.kinds || !filter.kinds->size()) return false;
+            for (size_t i = 0; i < filter.kinds->size(); ++i)
+                if (!publicKinds.contains(filter.kinds->at(i))) return false;
+        }
+        return true;
+    }
+    void request(Subscription sub, bool publicRead = false) {
         std::optional<Rejection> rejection;
+        std::optional<Subscription> admitted;
         {
             std::lock_guard lock(mutex);
             auto it = connections.find(sub.connId);
@@ -155,18 +194,23 @@ struct ReadAdmission {
             auto &conn = it->second;
             auto name = sub.subId.str();
             eraseJobs(sub.connId, &name);
-            if (jobs.size() >= maxPending || (!conn.subs.contains(name) && conn.subs.size() >= maxSubs)) {
+            if ((!publicRead && jobs.size() >= maxPending) || (!conn.subs.contains(name) && conn.subs.size() >= maxSubs)) {
                 rejection = rejectLocked(sub.connId, conn, "rate-limited: read admission capacity exceeded");
                 rejection->subs.push_back(name);
             } else {
                 sub.admissionId = ++nextId;
-                conn.subs.insert_or_assign(name, Entry{sub.admissionId});
-                jobs.push_back(Job{sub.admissionId, sub.connId, conn.authGeneration, conn.keys.values,
-                    Clock::now() + std::chrono::seconds(timeout), std::move(sub)});
-                changed.notify_one();
+                conn.subs.insert_or_assign(name, Entry{sub.admissionId, publicRead, !publicRead});
+                conn.clearIdleCheck();
+                if (publicRead) admitted.emplace(std::move(sub));
+                else {
+                    jobs.push_back(Job{sub.admissionId, sub.connId, conn.authGeneration, conn.keys.values,
+                        Clock::now() + std::chrono::seconds(timeout), std::move(sub)});
+                    changed.notify_one();
+                }
             }
         }
         if (rejection) onReject(*rejection);
+        if (admitted) onAdmit(std::move(*admitted));
     }
     void tick() {
         if (!enabled) return;
@@ -178,7 +222,7 @@ struct ReadAdmission {
             std::set<uint64_t> expiredJobs;
             for (const auto &job : jobs) if (now >= job.deadline) expiredJobs.insert(job.connId);
             for (auto &[id, conn] : connections) {
-                if (conn.closing || conn.subs.empty()) continue;
+                if (conn.closing || !conn.hasPolicySubs()) continue;
                 bool expired = !configMatches() || (conn.nextCheck != Clock::time_point::max()
                     && now >= conn.nextCheck + std::chrono::seconds(timeout));
                 expired |= expiredJobs.contains(id);
@@ -205,7 +249,7 @@ struct ReadAdmission {
                 auto now = Clock::now();
                 if (preferRecheck || jobs.empty()) {
                     for (auto &[id, conn] : connections) {
-                        if (!conn.closing && !conn.checkId && !conn.subs.empty() && conn.nextCheck <= now) {
+                        if (!conn.closing && !conn.checkId && conn.hasPolicySubs() && conn.nextCheck <= now) {
                             conn.checkId = ++nextId;
                             job.emplace(Job{conn.checkId, id, conn.authGeneration, conn.keys.values,
                                 conn.nextCheck + std::chrono::seconds(timeout), std::nullopt});
@@ -231,7 +275,7 @@ struct ReadAdmission {
                 std::lock_guard lock(mutex);
                 auto it = connections.find(job->connId);
                 if (broken) {
-                    for (auto &[id, conn] : connections) if (!conn.closing && !conn.subs.empty())
+                    for (auto &[id, conn] : connections) if (!conn.closing && conn.hasPolicySubs())
                         rejected.push_back(rejectLocked(id, conn, "error: read policy temporarily unavailable"));
                 } else if (it != connections.end() && !it->second.closing) {
                     auto &conn = it->second;

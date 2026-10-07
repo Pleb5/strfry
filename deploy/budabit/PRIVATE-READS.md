@@ -5,11 +5,16 @@ deployment. [Architecture](READ-CONTROL-PLAN.md); [live inventory](RUNBOOK.md).
 
 ## What is private
 
-One community governs the whole endpoint/database. All stored kinds remain behind
-membership, including definitions, profiles, lists and forms. AUTH proves key
-control, not membership. Each REQ is admitted once by a separate Python plugin.
-Existing connections with subscriptions are rechecked periodically and disconnected
-on denial. A configured plugin that fails never turns into public access.
+One community governs the endpoint/database. Definitions, profiles, lists and forms
+remain behind membership. The supplied preset exempts kind `1063` NIP-94/Blossom
+descriptors with `readPolicy.publicKinds = "1063"`: anyone can retrieve stored or live
+descriptors using explicit `kinds: [1063]` filters, without AUTH. Mixed/private and
+ID-only REQs still require membership. Descriptor writes require an eligible member,
+with no dedicated section grant; effective bans and last-grant revocation block them.
+AUTH proves key control, not membership. Each private REQ is admitted once by a
+separate Python plugin. Connections with private subscriptions are rechecked
+periodically and disconnected on denial. A failed plugin never exposes private
+data; public-only descriptor subscriptions remain available independently.
 
 The owner can bootstrap a missing definition only after a successful complete load.
 Ordinary members need the existing structural/moderator/any-section-grant role and
@@ -55,6 +60,7 @@ relay {
     }
     readPolicy {
         plugin = "/usr/local/lib/strfry/read-policy.py"
+        publicKinds = "1063"
         timeoutSeconds = 2
         recheckSeconds = 5
         maxPending = 1024
@@ -142,15 +148,19 @@ There is no core-status/reader-snapshot artifact health contract anymore.
 
 Keep ingress closed while using controlled keys to verify:
 
-1. Anonymous REQ: AUTH + CLOSED auth-required; no EVENT/EOSE.
-2. Nonmember: AUTH OK true, then REQ CLOSED restricted and disconnection.
+1. Anonymous private REQ: AUTH + CLOSED auth-required; no EVENT/EOSE.
+2. Nonmember: AUTH OK true, then private REQ CLOSED restricted and disconnection.
 3. Owner/member: complete expected retained history on appropriately scoped filters.
 4. Ban/removal with an already-live subscription: eventual CLOSED/disconnection
    without sending another REQ; record actual elapsed time.
 5. Grant/regrant: reconnect, AUTH and retry after refresh; no signing/reconnect loop.
-6. Plugin failure: no successful new reads; existing reads stop within configured
+6. Plugin failure: no successful new private reads; existing private reads stop within configured
    recheck/deadline behavior. Test recovery with fresh decisions.
 7. COUNT/Negentropy remain disabled; independent DM participant protection still applies.
+8. Anonymous/nonmember `kinds: [1063]` REQ: stored EVENT/EOSE and live descriptors
+   succeed, including during read-plugin failure. Nonmember descriptor writes fail;
+   eligible member writes succeed without a `1063` section. Mixed/private queries
+   retain the denial behavior above.
 
 The client invitation is `/c/<naddr>?read-access=members`; optional repeated `relay`
 query parameters override naddr hints. This explicit invitation requires AUTH

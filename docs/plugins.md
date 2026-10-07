@@ -96,7 +96,7 @@ To install:
 This fork provides a default-off whole-relay admission interface. Configure
 `relay.readPolicy.plugin` with an executable command to enable it. An empty command
 disables admission; a configured command that is missing or broken **never** means
-public access. The relay requires NIP-42 AUTH with a valid `wss://` service URL,
+public access for membership-protected requests. The relay requires NIP-42 AUTH with a valid `wss://` service URL,
 `relay.maxFilterLimitCount = 0` and `relay.negentropy.enabled = false` in this mode.
 Use nested blocks in the config file, as in the
 [Budabit operator example](../deploy/budabit/PRIVATE-READS.md#configure-the-replacement-explicitly).
@@ -106,6 +106,18 @@ One allow admits all of that REQ's filters, historical scan and live subscriptio
 No filter subdivision, event inspection or per-event policy call occurs. Independent
 DM participant restrictions still apply. AUTH success is not admission: a valid
 nonmember proof receives `OK true`, followed by denial when that client requests data.
+
+`relay.readPolicy.publicKinds` optionally exempts explicit kind-only REQs from
+membership admission and its AUTH prerequisite. Every effective filter must contain
+a nonempty `kinds` selection limited to the configured set. An ID-only, unbounded or
+mixed public/private request still requires admission. The Budabit preset uses
+`"1063"` for NIP-94/Blossom descriptors; the generic default is empty. The allowlist
+accepts only complete unsigned decimal kind tokens; malformed or overflowing values
+fail core startup, independently of deployment preflight. Public REQs
+retain lifecycle tokens, query/subscription limits and independent AUTH/DM restrictions.
+Public-only connections require no plugin calls or periodic rechecks and remain usable
+if the plugin fails. A denial of a private request still closes its whole connection,
+including any public subscriptions on that connection. COUNT/Negentropy stay disabled.
 
 An invalid AUTH proof instead receives `["OK", "<auth-event-id>", false, "<reason>"]`.
 There is no `AUTH-FAILED` message, and membership denial must not be disguised as
@@ -141,7 +153,7 @@ when **any** authenticated key is a current eligible reader.
 
 An active connection is rechecked through this same interface without asking the
 client for another signature. A successful REQ decision or recheck starts the next
-recheck interval. Connections without subscriptions need no periodic decision;
+recheck interval. Connections without membership-protected subscriptions need no periodic decision;
 their next REQ is checked normally. Rechecks and new requests share worker capacity.
 
 ### Read settings and failures
@@ -151,6 +163,7 @@ All `relay.readPolicy` settings require a restart:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `plugin` | `""` | Disabled unless a command is configured |
+| `publicKinds` | `""` | Comma-separated kinds exempt from membership for explicitly scoped REQs |
 | `timeoutSeconds` | `2` | Queue plus IPC budget, not just time spent in the child; range 1–30 |
 | `recheckSeconds` | `5` | Interval after a successful decision; range 1–300 |
 | `maxPending` | `1024` | Queued REQ decisions; range 1–65536 |
@@ -163,11 +176,11 @@ Legacy `readControl.enabled=true` refuses startup; it is not an alias for admiss
 
 | Condition | Client-visible outcome |
 | --- | --- |
-| REQ before AUTH | AUTH challenge plus `CLOSED` with `auth-required: authenticate to read this relay`; connection retained for AUTH/retry |
+| Membership-protected REQ before AUTH | AUTH challenge plus `CLOSED` with `auth-required: authenticate to read this relay`; connection retained for AUTH/retry |
 | Plugin denies | `CLOSED` with `restricted: read access denied`, then disconnect |
 | Policy unavailable or decision expires | `CLOSED` with `error: read policy temporarily unavailable`, then disconnect |
 | Admission queue/subscription capacity exceeded | `CLOSED` with `rate-limited: read admission capacity exceeded`, then disconnect |
-| Authenticated COUNT | `CLOSED` with `blocked: COUNT disabled with read admission` |
+| COUNT | `CLOSED` with `blocked: COUNT disabled with read admission` |
 
 Malformed/oversized/mismatched output, EOF, pipe failure or an IPC timeout stops the
 process and invalidates active read service depending on it. A later request can
@@ -181,7 +194,7 @@ policy versions or database epochs. Interrupted history cannot claim successful
 EOSE. There is no commit-atomic revocation or ability to retract transmitted bytes.
 
 NIP-11 advertises the core's generic `read_policy` version 1, `admission: "req"`,
-`consistency: "eventual"`, configured `recheck_seconds`, and
+`consistency: "eventual"`, configured `recheck_seconds`, `public_kinds` when nonempty, and
 `limitation.auth_required: true`. These facts do not claim what the plugin's policy
 means. Community-specific semantics, cache freshness and operating requirements
 are documented in [the Budabit read contract](../deploy/budabit/READ-CONTROL-PLAN.md).

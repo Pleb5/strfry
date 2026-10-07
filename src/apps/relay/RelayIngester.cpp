@@ -236,19 +236,17 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
 void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint64_t connId, const tao::json::value &arr, bool countOnly, std::string &outSubIdStr) {
     if (arr.get_array().size() < 2 + 1) throw herr("arr too small");
     outSubIdStr = jsonGetString(arr[1], "subscription id was not a string");
-    if (readAdmission.enabled) {
-        auto it = rsctx.connIdToAuthSession.find(connId);
-        if (it == rsctx.connIdToAuthSession.end() || !it->second.isAuthed()) {
-            sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
-            sendToConn(connId, tao::json::to_string(tao::json::value::array({
-                "CLOSED", outSubIdStr, "auth-required: authenticate to read this relay"})));
-            return;
-        }
-        if (countOnly) {
-            sendToConn(connId, tao::json::to_string(tao::json::value::array({
-                "CLOSED", outSubIdStr, "blocked: COUNT disabled with read admission"})));
-            return;
-        }
+    if (readAdmission.enabled && !countOnly) {
+        // A same-ID REQ replaces the previous generation even if validation or
+        // AUTH rejects it. Invalidate queued output before replying CLOSED.
+        SubId subId(outSubIdStr);
+        readAdmission.cancel(connId, outSubIdStr);
+        tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::RemoveSub{connId, subId}});
+    }
+    if (readAdmission.enabled && countOnly) {
+        sendToConn(connId, tao::json::to_string(tao::json::value::array({
+            "CLOSED", outSubIdStr, "blocked: COUNT disabled with read admission"})));
+        return;
     }
     if (arr.get_array().size() > 2 + cfg().relay__maxReqFilterSize) throw herr("arr too big");
 
@@ -273,6 +271,13 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
     auto it = rsctx.connIdToAuthSession.find(connId);
     bool hasSession = it != rsctx.connIdToAuthSession.end();
     bool isAuthed = hasSession && !it->second.authed.isNull();
+    bool publicRead = readAdmission.enabled && readAdmission.isPublic(filterGroup);
+    if (readAdmission.enabled && !publicRead && !isAuthed) {
+        sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
+        sendToConn(connId, tao::json::to_string(tao::json::value::array({
+            "CLOSED", outSubIdStr, "auth-required: authenticate to read this relay"})));
+        return;
+    }
     bool shouldRejectReq = false;
 
     if (countOnly) {
@@ -312,8 +317,7 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
     Subscription sub(connId, outSubIdStr, std::move(filterGroup), countOnly);
 
     if (readAdmission.enabled) {
-        tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::RemoveSub{connId, sub.subId}});
-        readAdmission.request(std::move(sub));
+        readAdmission.request(std::move(sub), publicRead);
     } else tpReqWorker.dispatch(connId, MsgReqWorker{MsgReqWorker::NewSub{std::move(sub)}});
 }
 

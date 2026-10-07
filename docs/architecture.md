@@ -92,6 +92,9 @@ cancelled subscriptions or dead connections; queued EVENT/EOSE and live recipien
 batches retain the subscription token through final output.
 
 The core does not know community addresses, readers or policy-relevant event kinds.
+Operator-configured `readPolicy.publicKinds` can admit explicit public-kind-only
+REQs directly, retaining lifecycle tokens. Public-only connections do not use the
+plugin or rechecks; mixed/unbounded requests still follow normal admission.
 One plugin allow covers the whole REQ; there is no community membership callback
 per event. A denial or unavailable decision closes the connection. Rechecks use
 the same predicate without new client signatures. The worker alternates due

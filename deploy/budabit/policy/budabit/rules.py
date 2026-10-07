@@ -18,6 +18,7 @@ AUTHORITY_KINDS = {
 }
 
 TARGETABLE_KINDS = {31922, 31923, 9041, 1623, 30033}
+FILE_METADATA_KIND = 1063
 PROTECTED_DELETE_KINDS = {P.COMMUNITY_DEFINITION_KIND, P.PROFILE_LIST_KIND}
 PROTECTED_DELETE_MESSAGE = "blocked: Deletion of kinds 32222 and 30000 is not allowed"
 LOADING_MESSAGE = "error: relay policy is loading, retry shortly"
@@ -151,6 +152,19 @@ def _section_rule(event, derived, pubkey, kind, subtype, community_id, config):
                 community_id,
             )
     return _accept("hosted", community_id)
+
+
+def _file_metadata(derived, pubkey, community_id):
+    # NIP-94/Blossom descriptors are shared infrastructure, not a section kind.
+    if derived.is_banned(pubkey):
+        return _banned(community_id)
+    if derived.has_any_role(pubkey):
+        return _accept("hosted", community_id, reason="member_file_metadata")
+    return _reject(
+        "blocked: file metadata requires a current community member",
+        "file_metadata_membership",
+        community_id,
+    )
 
 
 def evaluate_branch(event, branch, config, authority_required):
@@ -345,6 +359,9 @@ def evaluate_branch(event, branch, config, authority_required):
             community_id,
         )
 
+    if kind == FILE_METADATA_KIND:
+        return _file_metadata(derived, pubkey, community_id)
+
     subtype = P.derive_subtype(event)
     return _section_rule(event, derived, pubkey, kind, subtype, community_id, config)
 
@@ -400,6 +417,17 @@ def _strict_passthrough(event, state, config):
 
 
 def _passthrough(event, state, config):
+    if event.get("kind") == FILE_METADATA_KIND:
+        # Descriptors normally have no community tags. In either mode require
+        # eligibility in at least one hosted branch, using complete grants/bans.
+        outcomes = []
+        for branch in list(state.branches.values()):
+            derived = branch.derived()
+            outcomes.append(_availability(branch, derived) or
+                            _file_metadata(derived, event.get("pubkey") or "", branch.community_id))
+        return _best(outcomes) if outcomes else _reject(
+            "blocked: file metadata requires a current community member", "file_metadata_membership"
+        )
     if config.strict:
         return _strict_passthrough(event, state, config)
     return _accept("passthrough", reason="passthrough")

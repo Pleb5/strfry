@@ -1,6 +1,6 @@
 # Community reads: plugin-owned REQ admission
 
-Status: **implemented in source, default off**. Updated 2026-09-17. This is the
+Status: **implemented in source, default off**. Updated 2026-10-07. This is the
 current architecture/decision record, despite the retained `PLAN` filename. It
 replaces the commit-synchronized ReadGate design, which remains in Git history.
 It is not a live-deployment or release claim.
@@ -17,7 +17,7 @@ It is not a live-deployment or release claim.
 | Keep client-only moderation, public reads with write enforcement, and optional member-only reads as distinct deployment levels | Read admission is not required to use Communikeys or the write plugin. An empty `readPolicy.plugin` preserves public community reads, not public DM reads. |
 | Share public write-controlled hosting; dedicate private instances/databases | One community governs a private database. Multi-community read isolation is deliberately deferred; simpler authorization trades away shared-database hosting efficiency. |
 | Authenticate identity separately from admitting reads | Valid NIP-42 proofs succeed even for nonmembers. The read plugin alone decides eligibility; EVENT rules still use the verified event author. |
-| Admit the whole relay once per REQ | No public-kind exceptions, mixed-filter ACL analysis, result buffering or per-event community policy. Simplicity costs public discovery and applicant reads on that endpoint. |
+| Admit private content once per REQ; explicitly exempt file descriptors | The Budabit preset sets `readPolicy.publicKinds = "1063"`. Only requests limited to those kinds bypass membership; mixed/unbounded requests need admission. No result buffering or per-event community policy. |
 | Keep all membership semantics in Python | Reuse the existing `Branch` derivation and vectors without embedding a community roster/address or general policy framework in C++. |
 | Use a separate persistent read process | Serial write-plugin work cannot block read IPC or vice versa. Both remain bounded; this does not remove shared host/database resource contention. |
 | Accept eventual consistency, with periodic rechecks | Revoked readers with idle live subscriptions must lose access without another REQ, but policy observation and disconnect are not synchronized to commits. Five seconds is a default interval, not an end-to-end revocation SLA. |
@@ -29,8 +29,8 @@ It is not a live-deployment or release claim.
 One exact `BUDABIT_BRANCHES` address governs each private endpoint/database. It is
 an authority coordinate, not a URL, download instruction or automatic request to
 host every discovered community. Auto-hosting and dry-run are prohibited in the
-private preset. Every stored kind is behind admission; AUTH/control messages and
-NIP-11 are not stored-event exceptions.
+private preset. Stored kinds are behind admission except the explicit public-kind
+list (`1063` in the supplied preset); AUTH/control messages and NIP-11 are separate.
 
 Prefer a dedicated, community-controlled instance/database for member-only reads,
 whether self-operated or entrusted to a chosen operator. Public-read deployments
@@ -49,17 +49,21 @@ shared public writes, dedicated member-only reads”; practical guidance follows
 
 ```text
 AUTH -> C++ verifies identity -> OK true
-REQ  -> plugin checks membership once
+REQ limited to configured public kinds -> query history and establish live subscription
+Other REQ -> plugin checks membership once
            allow -> query history and establish live subscription
            deny  -> CLOSED restricted: + disconnect
-While subscribed, periodic connection recheck -> same plugin check -> continue/disconnect
+While privately subscribed, periodic connection recheck -> same plugin check -> continue/disconnect
 ```
 
-AUTH success is not community admission. Unauthenticated requests receive an AUTH
+AUTH success is not community admission. Unauthenticated private requests receive an AUTH
 challenge and CLOSED auth-required without disconnecting before they can respond.
 Unavailable policy is an error, not a successful empty query or a membership denial.
 A denial applies to the whole connection. There is no per-event community policy,
-classification of mixed filters, or preflight scan of potential query results.
+subdivision of mixed filters, or preflight scan of potential query results. Public-only
+connections do not depend on membership or plugin health. Public subscriptions share
+the same lifecycle tokens and limits; a private-request denial closes that connection's
+public subscriptions too.
 
 Membership is unchanged: the owner may bootstrap after a successful complete
 initial load even without a stored definition; non-owners need an available
@@ -77,7 +81,7 @@ client content moderation.
 | NIP-42 proof verification and authenticated keys | One configured community address |
 | Bounded asynchronous REQ/plugin transport | Background bounded local database scans |
 | Request and connection lifecycle tokens | Existing membership/ban derivation |
-| Execute query only after allow | In-memory eligible-key cache |
+| Execute private query only after allow; explicit configured public-kind exemption | In-memory eligible-key cache |
 | Periodic connection rechecks | Allow/deny/unavailable lookup |
 | Protocol replies, cancellation and disconnect | Maximum successful policy age |
 
@@ -94,7 +98,8 @@ checks for already-closed connections are lifecycle checks, not membership check
 Tokens cover connection lifetime, authenticated-key state and REQ/recheck generation,
 not database-policy epochs. `CLOSE` and REQ replacement invalidate pending allows;
 tokens accompany queued EVENT/EOSE and live recipient batches. Closing the last
-subscription resets the active recheck period, invalidating an old in-flight recheck.
+private subscription (or replacing it with a public one) resets the active recheck
+period, invalidating an old in-flight recheck.
 
 ## Consistency and failure
 
@@ -120,7 +125,7 @@ pass finishes; it is not a promise to install fresh state every second. This rea
 loop is independent of the write loader's roughly 300-second reconciliation and
 60-second speculative-acceptance grace.
 
-Requests and existing connections fail closed on expired decisions, malformed
+Private requests and connections depending on admission fail closed on expired decisions, malformed
 responses, pipe failure or plugin unavailability. The worker does not block the
 WebSocket/ingester thread. Pending work, frame size, connections, subscriptions,
 inbound bytes, request rate and outbound backlog are bounded. Rechecks share work
@@ -176,7 +181,7 @@ At the default recheck interval, the relevant NIP-11 fields are:
 ```json
 {
   "limitation": {"auth_required": true},
-  "read_policy": {"version": 1, "admission": "req", "consistency": "eventual", "recheck_seconds": 5},
+  "read_policy": {"version": 1, "admission": "req", "consistency": "eventual", "recheck_seconds": 5, "public_kinds": [1063]},
   "budabit": {"read_control": {"version": 2, "mode": "members", "scope": "relay", "unfiltered_kinds": [1, 5, 1984, 30000, 32222]}}
 }
 ```
@@ -186,6 +191,8 @@ The operator supplies `budabit.read_control` via `relay.info.extra`. Preflight c
 its completeness claims against configured restrictions and refuses branch-list
 leakage. `unfiltered_kinds` means no post-limit involved-key filtering for those
 authenticated queries, not unlimited results or exemptions from membership.
+`read_policy.public_kinds` advertises the separate explicit-kind REQ exemption;
+preflight permits only `1063` in this preset and checks the serving list against config.
 The core also advertises its normal limits, including `limitation.max_limit`.
 
 These fields describe the server/operator contract. The consolidated client does
@@ -197,7 +204,7 @@ Old `readControl.enabled=true` refuses relay startup rather than silently becomi
 public. Configure the replacement explicitly. No automatic config renderer or
 disclosure migration is provided.
 
-Tests: `readAdmissionTest.js`, `budabitReadAdmissionTest.js`, `dm4444Test.js`, `nip70Test.js`,
+Tests: `readAdmissionTest.js`, `budabitReadAdmissionTest.js`, `fileMetadataTest.js`, `dm4444Test.js`, `nip70Test.js`,
 Python `test_read_admission.py` and `test_read_admission_preflight.py`, plus retained
 AUTH/write/read/client regressions. The old epoch/snapshot test suites were replaced,
 not relabeled as proof of the old guarantees. The historical isolated native-client

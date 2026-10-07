@@ -20,6 +20,13 @@ try {
     assert.notEqual(result.status,0);
     assert.match(result.stderr,/readControl was replaced|read policy requires/);
   }
+  for (const publicKinds of ["1_063", "1063junk", "1063,1_063", "1.063", "0x427", "-1", "+1063", "18446744073709551616"]) {
+    writeFileSync(guard, original.replace('publicKinds = ""', `publicKinds = ${JSON.stringify(publicKinds)}`));
+    const result = spawnSync("./strfry", ["--config", guard, "relay"], {env:f.env, encoding:"utf8", timeout:5000});
+    assert.equal(result.error, undefined, "invalid public kinds must fail startup without timing out");
+    assert.notEqual(result.status, 0, `invalid public kinds accepted: ${publicKinds}`);
+    assert.match(result.stderr, /invalid readPolicy\.publicKinds/);
+  }
   f.import(Array.from({length: 200}, (_, i) => event(owner, 1, [], `history-${i}`)));
   const anon = await f.connect();
   assert.match((await f.read(anon)).at(-1)[2], /^auth-required:/);

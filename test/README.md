@@ -20,6 +20,11 @@ Negentropy, and explicitly configured optional restrictions.
 
     python3 -m unittest discover -s deploy/budabit/tests -t deploy/budabit/tests -p 'test_*.py'
     node test/tests/budabitPolicyTest.js
+    node test/tests/fileMetadataTest.js
+
+The file-metadata regression covers kind-1063 member-only writes in strict and
+passthrough modes, anonymous/nonmember stored/live reads on public/member relays,
+revocation/bans, mixed-filter isolation and public-subscription lifecycle/failures.
 
 ## Fuzz tests
 

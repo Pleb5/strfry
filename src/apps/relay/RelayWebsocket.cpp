@@ -139,6 +139,12 @@ void RelayServer::runWebsocket(ThreadPool<MsgWebsocket>::Thread &thr) {
                     {"version", 1}, {"admission", "req"}, {"consistency", "eventual"},
                     {"recheck_seconds", readAdmission.interval},
                 });
+                if (!readAdmission.publicKinds.empty()) {
+                    auto kinds = tao::json::value::array({});
+                    for (auto kind : std::set<uint64_t>(readAdmission.publicKinds.begin(), readAdmission.publicKinds.end()))
+                        kinds.get_array().push_back(kind);
+                    nip11["read_policy"]["public_kinds"] = std::move(kinds);
+                }
             }
             rendered = preGenerateHttpResponse("application/json", tao::json::to_string(nip11));
             ver = cfg().version();

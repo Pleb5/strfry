@@ -70,6 +70,21 @@ def private_claim(info):
             and claim.get("mode") == "members" and claim.get("scope") == "relay")
 
 
+def configured_public_kinds(values):
+    value = values.get("relay.readPolicy.publicKinds", "")
+    if not isinstance(value, str):
+        raise ValueError("invalid public kinds")
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    # Python int accepts underscores/unicode digits that the C++ parser does not.
+    # In particular, "1_063" must not pass preflight and expose kind 1 in core.
+    if any(not re.fullmatch(r"[0-9]+", item) for item in items):
+        raise ValueError("invalid public kinds")
+    kinds = {int(item) for item in items}
+    if not kinds <= {1063}:
+        raise ValueError("Budabit read admission only permits public file metadata")
+    return kinds
+
+
 def validate(values, env):
     policy = BudabitConfig.from_env(env)
     if any(key.startswith("relay.readControl.") for key in values):
@@ -114,6 +129,7 @@ def validate(values, env):
     kinds = claim.get("unfiltered_kinds", [])
     require(isinstance(kinds, list) and all(type(kind) is int for kind in kinds) and set(kinds) == UNFILTERED, "declare authority/text completeness kinds")
     restricted = {int(value.strip()) for value in values.get("relay.auth.restrictedReadKinds", "4,4444").split(",") if value.strip()}
+    require(not restricted & configured_public_kinds(values), "public kinds conflict with AUTH restrictions")
     if values.get("relay.auth.restrictReadToInvolvedPubkey", True):
         require(not restricted & UNFILTERED, "unfiltered metadata conflicts with event restrictions")
     return True
@@ -124,7 +140,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise ValueError("health endpoint redirected")
 
 
-def check_advertisement(url, enabled):
+def check_advertisement(url, enabled, public_kinds=()):
     request = urllib.request.Request(url, headers={"Accept": "application/nostr+json"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with opener.open(request, timeout=5) as response:
@@ -141,6 +157,10 @@ def check_advertisement(url, enabled):
                 or core.get("admission") != "req" or core.get("consistency") != "eventual"
                 or type(core.get("recheck_seconds")) is not int or not 1 <= core["recheck_seconds"] <= 300):
             raise ValueError("serving endpoint lacks read admission capability")
+        advertised = core.get("public_kinds", [])
+        if (not isinstance(advertised, list) or any(type(kind) is not int for kind in advertised)
+                or set(advertised) != set(public_kinds)):
+            raise ValueError("serving endpoint public kinds/config disagree")
     elif core or info.get("budabit", {}).get("read_control"):
         raise ValueError("serving endpoint/config disagree")
 
@@ -156,9 +176,10 @@ def main():
             text = handle.read(1048577)
         if len(text) > 1048576:
             raise ValueError("configuration too large")
-        enabled = validate(parse_config(text), {**os.environ, "STRFRY_CONFIG": args.config})
+        values = parse_config(text)
+        enabled = validate(values, {**os.environ, "STRFRY_CONFIG": args.config})
         if args.url:
-            check_advertisement(args.url, enabled)
+            check_advertisement(args.url, enabled, configured_public_kinds(values) if enabled else ())
         print("read admission config/advertisement: " + ("members" if enabled else "off"))
         return 0
     except (OSError, ValueError, TypeError, KeyError, AttributeError):

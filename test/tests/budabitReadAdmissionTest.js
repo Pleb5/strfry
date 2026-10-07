@@ -34,7 +34,7 @@ try {
   assert((await f.read(restored)).some(m=>m[0]==="EVENT" && m[2].id===note.id));
   const profile = await (await fetch("http://127.0.0.1:40582/",{headers:{accept:"application/nostr+json"}})).json();
   assert.equal(profile.limitation.auth_required,true);
-  assert.deepEqual(profile.read_policy,{version:1,admission:"req",consistency:"eventual",recheck_seconds:1});
+  assert.deepEqual(profile.read_policy,{version:1,admission:"req",consistency:"eventual",recheck_seconds:1,public_kinds:[1063]});
   assert.equal(profile.budabit.read_control.version,2);
   assert(!profile.supported_nips.includes(70));
   restored.send(["REQ","stale",{kinds:[1],limit:0}]);
