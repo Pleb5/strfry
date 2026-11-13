@@ -57,8 +57,15 @@ sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/strfry/db
 ```
 
 The write-policy plugin applies per-pubkey, per-source, and global token
-buckets. It rejects writes when `data.mdb` reaches 10 GiB or when the database
-filesystem has less than 25 GiB available.
+buckets. The source preset budgets 4,000 EVENT admissions/minute globally and
+per source (1,000 burst), plus 60/minute per outer author (60 burst). It targets
+100 users / 500 logical messages per minute aggregate, with room in the admission
+budget for all 100 sending 15/minute with two DM envelopes plus other-write
+headroom. Five/user/minute is an average, not an individual cap. This is not a
+VPS capacity measurement or a live configuration claim.
+See [write limits and activation/rollback](RUNBOOK.md#write-limits). It rejects
+writes when `data.mdb` reaches 10 GiB or when the database filesystem has less
+than 25 GiB available.
 
 ## Community write control
 

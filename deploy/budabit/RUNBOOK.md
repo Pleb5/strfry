@@ -254,18 +254,128 @@ does not use NIP-42 state.
 
 ### Write limits
 
-The write policy applies token buckets with these initial settings:
+**Source preset, revised 2026-11-13; not deployed or load-tested.** Current VPS
+settings are unknown. The last checked-in preset was pubkey 30 burst / 2 per
+minute, source 100 / 10, global 200 / 20; historical receipts do not attest what
+is running now.
 
-| Scope | Burst capacity | Refill rate |
+| Scope | Burst capacity (EVENTs) | Continuous refill | Empty to full, no traffic |
+| --- | ---: | ---: | ---: |
+| Outer event pubkey | 60 | 60 EVENTs/minute (1/second) | 60 seconds |
+| Source type + IP | 1,000 | 4,000 EVENTs/minute (~66.7/second) | 15 seconds |
+| Whole relay process | 1,000 | 4,000 EVENTs/minute (~66.7/second) | 15 seconds |
+
+This is a reasonable starting admission budget for **100 users / 500 logical
+messages per minute aggregate**, averaging five logical messages/user/minute.
+**Five is not a per-user cap.** The operator additionally requires room for an
+individual to send 15 logical messages/minute; the aggregate allowance also
+covers all 100 users at that peak when using two envelopes:
+
+- Two independently published self/recipient DM envelopes per logical message
+  require 1,000 EVENT admissions/minute at the 500-message planning average.
+  All 100 users sending 15 logical messages/minute requires 3,000 envelope
+  admissions/minute, leaving 1,000/minute for other writes, receipts, deletions
+  and workflow overhead. More envelopes, group fanout, signing/RPC traffic or background
+  activity must be counted explicitly; the policy does not count human messages.
+- A stable outer author gets 60 EVENTs/minute sustained: 15 two-envelope messages
+  require 30, leaving 30 for metadata/deletions or other writes. This is six times
+  the average two-envelope workload of 10/user/minute. All 100 authors
+  cannot simultaneously use their maximum; the aggregate budget is smaller.
+- Source capacity/refill deliberately equals global so 100 users on one shared
+  NAT can use the full relay budget. It is not per-device fairness or an extra
+  per-IP abuse restriction at this preset. Ensure the trusted proxy supplies
+  accurate client IPs; public clients must not control the trusted header.
+- A full global/source bucket can admit 1,000 immediate publications, e.g. five
+  simultaneous two-envelope messages from each of 100 users (subject to every
+  other policy stage). Refill is continuous, **not a fixed minute window**:
+  each bucket allows at most its starting tokens plus its refill over elapsed
+  time. Starting full, the global budget can therefore admit up to 5,000 in the
+  first minute, not a hard 4,000-per-clock-minute maximum.
+
+All three buckets must have a token, checked global -> source -> author; one
+token is debited from each only after the entire pipeline accepts. There are
+no blanket DM or deletion exemptions. The author is the signed **outer pubkey**,
+not a NIP-42 identity or decrypted sender. Rotating gift-wrap authors bypass
+the stable-author ceiling but remain bounded by global/source admission. One
+event delivered to several subscribers is still one admission; separately
+published distinct envelopes each count. AUTH proofs, reads and already-stored
+duplicates do not debit these write buckets. In-flight duplicates and later
+failed/deleted/replaced DB outcomes can still debit before the DB outcome;
+this preset does not change that accounting.
+
+Tracking remains bounded to **10,000 pubkeys and 4,096 sources**. When a map is
+full, its least-recently-used bucket is reclaimed only if it has completely
+refilled; otherwise the new identity is rejected with a tracking-limit error.
+Recreation at full capacity then grants no extra allowance. This replaces the
+old one-hour idle requirement, which could exhaust 10,000 slots in about ten
+minutes at 1,000 fresh DM authors/minute. At these defaults an untouched author
+bucket is full within 60 seconds; the global budget admits at most 5,000 events
+in that interval starting full. Thus key rotation at the intended load does
+not require an unbounded table. Custom high-rate/low-refill overrides can still
+encounter tracking limits; the limiter conservatively checks only the oldest
+entry, not a full-map scan.
+
+Bucket state is local to one persistent write-policy process, shared by all
+ingester/read workers and WebSocket connections. Reconnects do not reset it;
+plugin replacement or relay/container restart does. Independent relay replicas
+do not share state. Rejections do not debit tokens. The exact global error is
+`rate-limited: relay write limit exceeded`; source, pubkey and tracking errors
+are distinct. Clients receive `OK false` with that reason and no retry-after.
+
+This remains first-come-first-served, **not a guaranteed fair share per person**.
+A rotating-author publisher can compete for all shared capacity. CPU, signature
+verification, database growth, subscription fanout, bandwidth and shared-VPS
+disk pressure are not measured or guaranteed by these numbers. The unchanged
+storage/community guards still run before rate admission. Storage rejection
+(`blocked: relay filesystem is low on space`, etc.), DB `Write error: ...`, and
+outage/no ACK must be distinguished from rate rejection. Keep Blossom's remote
+newest-three APK retention and actual log bounds operational independently;
+raising admission rates cannot fix disk exhaustion.
+
+#### Operator activation and rollback (future, separately authorized)
+
+This revision changes **source only**. No image was built, service recreated,
+production traffic generated or capacity test performed for this revision;
+review was static and no test suites were run. Activation requires a separately
+authorized deployment:
+
+1. Record the actual running image/digest, plugin hash/path, six rate settings
+   and process age, plus current disk space and log bounds. Save the active
+   deployment files/limits for rollback without publishing secrets. Do not
+   replace customized public/private AUTH/read/community configuration wholesale.
+2. Build/package the reviewed committed revision using the existing deployment
+   procedure and record its source commit and image digest. The policy lives
+   inside the image: changing only old host-side Python files does not update it.
+   A new image is needed for the bounded bucket-reclamation change, although the
+   six numeric limits can also be applied to an older plugin via environment.
+3. In the deployment bundle, merge the six `STRFRY_POLICY_*` settings below
+   into the relay service's environment. The revised Compose template and Python
+   defaults agree; Compose now accepts explicit overrides via shell/`.env`.
+   Older deployed Compose files may hard-code the limits, so merely adding
+   `.env` values there will not necessarily change them. Restart/recreate only
+   during the separately approved deployment, using the established runbook.
+4. Verify the actual running image and six selected values, then inspect health,
+   storage, existing write/rejection logs and ordinary operator traffic. Do not
+   infer adoption from a checked-out file or issue load traffic without approval.
+   A new policy process starts with full buckets; this is not a throughput result.
+5. If rollback is needed, restore the saved prior image **and** explicit prior
+   values in the active Compose environment and recreate through the same
+   procedure. To return specifically to the original checked-in numerical
+   policy, use the original column below; that does not establish the previous
+   live values. Preserve current security/community settings when rolling back.
+
+| Environment setting | Revised default | Original checked-in value |
 | --- | ---: | ---: |
-| Event pubkey | 30 events | 2 events/minute |
-| Source IP | 100 events | 10 events/minute |
-| Whole relay | 200 events | 20 events/minute |
+| `STRFRY_POLICY_PUBKEY_CAPACITY` | 60 | 30 |
+| `STRFRY_POLICY_PUBKEY_RATE_PER_MINUTE` | 60 | 2 |
+| `STRFRY_POLICY_IP_CAPACITY` | 1000 | 100 |
+| `STRFRY_POLICY_IP_RATE_PER_MINUTE` | 4000 | 10 |
+| `STRFRY_POLICY_GLOBAL_CAPACITY` | 1000 | 200 |
+| `STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE` | 4000 | 20 |
 
-Tracking is bounded to 10,000 pubkeys and 4,096 sources. New identities are
-rejected when a non-stale tracking map is full. Bucket state is in memory and
-resets when the plugin or container restarts; the disk guard remains the final
-persistent safety boundary.
+Use finite positive capacities/refills for this preset. Lowering just the
+refill without checking the burst and identity-retention implications changes
+the budget; raising only burst cannot increase sustained capacity.
 
 ### Storage limits
 

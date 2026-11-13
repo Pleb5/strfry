@@ -27,15 +27,17 @@ class RateLimiter(Stage):
     name = "ratelimit"
 
     def __init__(self, env, clock):
-        self.pubkey_capacity = float(env.get("STRFRY_POLICY_PUBKEY_CAPACITY", "30"))
+        # Budget EVENT admissions, not logical DMs. Keep defaults aligned with
+        # compose.yaml and RUNBOOK.md#write-limits (including shared NAT traffic).
+        self.pubkey_capacity = float(env.get("STRFRY_POLICY_PUBKEY_CAPACITY", "60"))
         self.pubkey_rate = (
-            float(env.get("STRFRY_POLICY_PUBKEY_RATE_PER_MINUTE", "2")) / 60.0
+            float(env.get("STRFRY_POLICY_PUBKEY_RATE_PER_MINUTE", "60")) / 60.0
         )
-        self.ip_capacity = float(env.get("STRFRY_POLICY_IP_CAPACITY", "100"))
-        self.ip_rate = float(env.get("STRFRY_POLICY_IP_RATE_PER_MINUTE", "10")) / 60.0
-        self.global_capacity = float(env.get("STRFRY_POLICY_GLOBAL_CAPACITY", "200"))
+        self.ip_capacity = float(env.get("STRFRY_POLICY_IP_CAPACITY", "1000"))
+        self.ip_rate = float(env.get("STRFRY_POLICY_IP_RATE_PER_MINUTE", "4000")) / 60.0
+        self.global_capacity = float(env.get("STRFRY_POLICY_GLOBAL_CAPACITY", "1000"))
         self.global_rate = (
-            float(env.get("STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE", "20")) / 60.0
+            float(env.get("STRFRY_POLICY_GLOBAL_RATE_PER_MINUTE", "4000")) / 60.0
         )
         self.max_tracked_pubkeys = int(
             env.get("STRFRY_POLICY_MAX_TRACKED_PUBKEYS", "10000")
@@ -54,7 +56,11 @@ class RateLimiter(Stage):
         if bucket is None:
             if len(buckets) >= max_entries:
                 _, oldest = next(iter(buckets.items()))
-                if now - oldest.last_seen < 3600:
+                # One-time DM authors must not fill the tracking map for an
+                # hour. Reclaim only a fully replenished bucket: recreating it
+                # at capacity then grants no tokens beyond its existing budget.
+                oldest.refill(now)
+                if oldest.tokens < oldest.capacity:
                     return None
                 buckets.popitem(last=False)
             bucket = TokenBucket(capacity, rate, now)
