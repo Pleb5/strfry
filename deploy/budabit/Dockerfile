@@ -5,6 +5,9 @@ FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc
 # Build the reviewed checkout, not a legacy remote core with a newer Python
 # plugin. Initialize its submodules first. Record the resulting image digest.
 ARG SOURCE_REVISION=local-unreleased
+# Compile jobs for make and golpe's uWebSockets sub-build (NPROC, otherwise
+# unlimited). Use --build-arg BUILD_JOBS=1 on small shared hosts to bound memory.
+ARG BUILD_JOBS=2
 
 WORKDIR /build
 
@@ -30,7 +33,7 @@ COPY golpe ./golpe
 COPY external ./external
 RUN test -f src/apps/relay/ReadAdmission.h \
     && test -f golpe/external/hoytech-cpp/README.md \
-    && make -j2
+    && make -j"${BUILD_JOBS:-2}" NPROC="${BUILD_JOBS:-2}"
 
 FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 ARG SOURCE_REVISION=local-unreleased

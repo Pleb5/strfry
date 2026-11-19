@@ -185,12 +185,14 @@ sudo git submodule update --init --recursive        # golpe, external/negentropy
 # Only if feat/dm-rate-budget is live (record the resulting local commit as the deployed source):
 #   sudo git merge --no-ff origin/feat/dm-rate-budget && REV=$(sudo git rev-parse HEAD)
 sudo docker build -f deploy/budabit/Dockerfile --build-arg SOURCE_REVISION=$REV \
-  -t budabit/strfry:${REV:0:12} .
+  --build-arg BUILD_JOBS=1 -t budabit/strfry:${REV:0:12} .
 ```
 
 This is a full C++ build: the `golpe.yaml` descriptions changed, so every translation
-unit recompiles. The Dockerfile uses `make -j2`; the runbook records a VPS-specific
-`make -j1` variant. Keep the old image and record the image ID.
+unit recompiles. On the deploy branch, `BUILD_JOBS` (default 2) sets both `make -j` and
+golpe's uWebSockets `NPROC`, which is otherwise unlimited. Use `BUILD_JOBS=1` on the
+shared VPS: BuildKit has no per-build memory cap, so this runs one compiler at a time.
+Keep the old image and record the image ID.
 
 ### Activate
 
