@@ -22,6 +22,8 @@ struct AuthSession {
   static constexpr size_t kChallengeSize = 22;
 
   std::array<char, kChallengeSize> challenge{};
+  // NIP-42: the challenge stays valid for the whole connection; send it only once.
+  bool challengeSent = false;
   Bytes32 authed;
   AuthKeys keys;
   std::chrono::steady_clock::time_point attemptWindow = std::chrono::steady_clock::now();

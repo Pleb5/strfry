@@ -207,8 +207,9 @@ void RelayServer::runNegentropy(ThreadPool<MsgNegentropy>::Thread &thr) {
                     }
                     return true;
                 });
-                // Shared precomputed trees contain every matching event. Use
-                // the participant-filtered memory path for any possible DM.
+                // Shared precomputed trees contain every matching event. Use the
+                // participant/recipient-filtered memory path for any possible DM or
+                // gift wrap, so reconciliation never exposes IDs the reader may not see.
                 if (ReadRestrictor::mayContainRestricted(msg->sub.filterGroup)) treeId.reset();
 
                 queries.removeSub(connId, subId);
