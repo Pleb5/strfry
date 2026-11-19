@@ -140,7 +140,9 @@ not part of this replacement.
 ## Independent privacy and client behavior
 
 Kind `4444` and retained kind `4` participant privacy are mandatory independently of
-community mode. Kind `1059` is unrestricted by default; explicit additional-kind
+community mode. NIP-59 gift wraps (`1059`, `21059`) are readable only by an
+authenticated `p`-tag recipient, and filters listing them must be `#p`-scoped to
+authenticated keys ([GIFT-WRAP-READS.md](GIFT-WRAP-READS.md)); explicit additional-kind
 restrictions and whole-relay admission still apply. Restricted COUNT must be safely
 participant-scoped; shared Negentropy trees are bypassed when results may include
 restricted events. Community mode disables

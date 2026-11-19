@@ -185,15 +185,22 @@ authenticated author can read them. Existing behavior treats any valid 32-byte
 `p` tag as a recipient, even if a historical event has more than one; no new
 single-recipient validation or rewrite of signed events is introduced here.
 
-Kind1059 encrypted envelopes have no mandatory participant or AUTH requirement.
-On a public relay they can be retrieved anonymously, including through mixed
-ContextVM subscriptions (`25910`, `1059`, `21059`). Explicit additional-kind
-restrictions and whole-relay admission still apply when configured.
+NIP-59 gift wraps (kinds `1059` and `21059`) are recipient-only, independently of
+`readPolicy.plugin`, `restrictedReadKinds` and the involved-key toggle: only a
+connection authenticated as a pubkey in one of the event's `p` tags can read them.
+Their random outer author is never a reader. A filter that lists a gift-wrap kind
+must be `#p`-scoped to authenticated keys, otherwise the whole REQ/COUNT/NEG-OPEN is
+refused, with the AUTH challenge sent before `auth-required:`. This includes mixed
+ContextVM subscriptions (`25910`, `1059`, `21059`); unauthenticated clients no longer
+silently miss their gift wraps but must authenticate and resubscribe. With AUTH
+disabled/unconfigured, gift wraps are inaccessible, not public. See
+[GIFT-WRAP-READS.md](GIFT-WRAP-READS.md) for semantics, client compatibility limits,
+deployment and rollback.
 
-**Upgrade from b574d2b or earlier mandatory-1059 builds:** deploy the updated binary
-and remove `1059` from any explicit `relay.auth.restrictedReadKinds` list (the new
-default is `"4, 4444"`). A config-only edit cannot remove the old binary's mandatory
-restriction. Verify stored and live 1059 reads without AUTH after deployment.
+**History:** b574d2b and earlier builds restricted 1059 to author or recipient
+participants; 811f6ff made 1059 publicly readable by default (its notes cite mixed
+ContextVM subscriptions on relays without AUTH). The current source supersedes both.
+Any `1059` entry in `restrictedReadKinds` is now redundant.
 
 `relay.nip70.enabled=false` is the new default. It ignores protected-tag author-auth
 semantics and NIP-70 embedded-repost rejection, leaves signed events unchanged,

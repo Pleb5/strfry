@@ -238,8 +238,8 @@ the `-` marker cannot be accepted and are rejected by strfry.
 That is historical image behavior, not the current source default. The new source
 defaults NIP-70 off (ignore its protection semantics, preserve signed tags) and
 always protects DM kinds `4` and `4444`; usable reads of those kinds require configured
-AUTH. Kind `1059` is public by default; remove any explicit 1059 entry from
-`restrictedReadKinds` when upgrading to that behaviour. Optional whole-relay admission
+AUTH. NIP-59 gift wraps (`1059`, `21059`) are recipient-only and need AUTH too; see
+[GIFT-WRAP-READS.md](GIFT-WRAP-READS.md) before deploying that change. Optional whole-relay admission
 has a separate configuration and periodic recheck contract. See
 [PRIVATE-READS.md](PRIVATE-READS.md) before building or operating
 that source; no image promotion is implied by these documentation updates.
