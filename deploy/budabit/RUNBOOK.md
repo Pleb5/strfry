@@ -11,6 +11,11 @@ whichever source commit a later checkout or rebase happens to select.
 
 ## Current status
 
+**Superseded on 2026-11-19:** the live relay now runs `budabit/strfry:78f7ca914c02`
+(`sha256:f6a48ca5…`, source `78f7ca91`); the previous live image was
+`budabit/strfry:53c711c`. See [DEPLOYMENT-2026-11-19-giftwrap.md](DEPLOYMENT-2026-11-19-giftwrap.md).
+The inventory below is older and was not refreshed.
+
 This is the last recorded deployment inventory, not a fresh live inspection.
 
 **Optional private source preset (not live):** see [PRIVATE-READS.md](PRIVATE-READS.md)
