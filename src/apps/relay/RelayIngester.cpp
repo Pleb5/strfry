@@ -9,6 +9,23 @@ std::string RelayServer::ensureChallenge(RelayServerCtx &rsctx, uint64_t connId)
     return std::string(it->second.challengeSv());
 }
 
+// Reason for refusing a NIP-59 gift-wrap read (see ReadRestrictor::giftWrapScope).
+// When AUTH can help, the challenge is queued before the caller's CLOSED/NEG-ERR
+// (both share the connection's ordered output), so clients that only answer a
+// challenge they have already received can authenticate and resubscribe.
+static std::string giftWrapReadRejection(RelayServer &server, RelayServerCtx &rsctx, uint64_t connId, ReadRestrictor::GiftWrapScope scope) {
+    if (scope == ReadRestrictor::GiftWrapScope::MissingRecipients)
+        return "restricted: gift-wrap filters (kinds 1059/21059) must list their recipients in #p";
+    if (!cfg().relay__auth__enabled || cfg().relay__auth__serviceUrl.empty())
+        return "restricted: gift-wrap reads require relay AUTH support";
+    server.sendAuthChallenge(connId, server.ensureChallenge(rsctx, connId));
+    return "auth-required: gift wraps are readable only by their authenticated #p recipient";
+}
+
+static bool rejectsGiftWrapRead(ReadRestrictor::GiftWrapScope scope) {
+    return scope == ReadRestrictor::GiftWrapScope::NeedsAuth || scope == ReadRestrictor::GiftWrapScope::MissingRecipients;
+}
+
 void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
     RelayServerCtx rsctx;
 
@@ -278,11 +295,22 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
             "CLOSED", outSubIdStr, "auth-required: authenticate to read this relay"})));
         return;
     }
+
+    // NIP-59 gift wraps (1059/21059) are recipient-only. A filter listing them must be
+    // #p-scoped to keys authenticated on this connection, otherwise the whole REQ/COUNT
+    // is refused: a mixed subscription must not silently lose its gift wraps.
+    auto giftWrapScope = ReadRestrictor::giftWrapScope(filterGroup, isAuthed ? it->second.keys.values : std::vector<Bytes32>{});
+    if (rejectsGiftWrapRead(giftWrapScope)) {
+        auto reason = giftWrapReadRejection(*this, rsctx, connId, giftWrapScope);
+        sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, reason})));
+        return;
+    }
+
     bool shouldRejectReq = false;
 
     if (countOnly) {
         // COUNT can't be filtered per event, so a restricted-kind filter must be
-        // scoped to the client's own pubkeys via authors/#p.
+        // scoped to the client's own pubkeys via authors/#p (gift wraps: #p only).
         shouldRejectReq = !ReadRestrictor::isFilterAllowedToCount(filterGroup, isAuthed ? it->second.keys.values : std::vector<Bytes32>{});
     } else {
         // if the filter group contains no filter that has a kind that is not restricted,
@@ -418,12 +446,23 @@ void RelayServer::ingesterProcessNegentropy(lmdb::txn &txn, RelayServerCtx &rsct
 
         NostrFilterGroup filter(filterJson, maxFilterLimit);
 
+        auto it = rsctx.connIdToAuthSession.find(connId);
+        bool hasSession = it != rsctx.connIdToAuthSession.end();
+        bool isAuthed = hasSession && !it->second.authed.isNull();
+
+        // Same NIP-59 recipient-only admission as REQ: no reconciliation (and so no
+        // event IDs) for a gift-wrap filter not #p-scoped to authenticated keys.
+        auto giftWrapScope = ReadRestrictor::giftWrapScope(filter, isAuthed ? it->second.keys.values : std::vector<Bytes32>{});
+        if (rejectsGiftWrapRead(giftWrapScope)) {
+            auto reason = giftWrapReadRejection(*this, rsctx, connId, giftWrapScope);
+            PROM_INC_RELAY_MSG("NEG-ERR");
+            sendToConn(connId, tao::json::to_string(tao::json::value::array({"NEG-ERR", subscriptionStr, reason})));
+            return;
+        }
+
         // if the filter group contains no filter that has a kind that is not restricted,
         // that means an unauthenticated client won't be able to see anything
         if (ReadRestrictor::isFilterGroupFullyRestricted(filter)) {
-            auto it = rsctx.connIdToAuthSession.find(connId);
-            bool hasSession = it != rsctx.connIdToAuthSession.end();
-            bool isAuthed = hasSession && !it->second.authed.isNull();
             if (!isAuthed) {
                 std::string challenge;
                 if (!hasSession) {
