@@ -9,16 +9,29 @@ std::string RelayServer::ensureChallenge(RelayServerCtx &rsctx, uint64_t connId)
     return std::string(it->second.challengeSv());
 }
 
+// NIP-42: a challenge is valid for the whole connection, so each connection is sent
+// its challenge at most once: on open with read admission, otherwise just before
+// the first "auth-required:" reply. Later replies rely on the challenge the client
+// already holds. Resending the identical challenge made some clients reject it as
+// invalid (Freedom Builders apps <= 257) or sign AUTH twice. Verification is unchanged.
+static void sendChallengeOnce(RelayServer &server, RelayServerCtx &rsctx, uint64_t connId) {
+    server.ensureChallenge(rsctx, connId);
+    auto &session = rsctx.connIdToAuthSession.at(connId);
+    if (session.challengeSent) return;
+    session.challengeSent = true;
+    server.sendAuthChallenge(connId, session.challengeSv());
+}
+
 // Reason for refusing a NIP-59 gift-wrap read (see ReadRestrictor::giftWrapScope).
-// When AUTH can help, the challenge is queued before the caller's CLOSED/NEG-ERR
-// (both share the connection's ordered output), so clients that only answer a
-// challenge they have already received can authenticate and resubscribe.
+// When AUTH can help and this connection has not had its challenge yet, the
+// challenge is queued before the caller's CLOSED/NEG-ERR (both share the
+// connection's ordered output), so the client holds it when the refusal arrives.
 static std::string giftWrapReadRejection(RelayServer &server, RelayServerCtx &rsctx, uint64_t connId, ReadRestrictor::GiftWrapScope scope) {
     if (scope == ReadRestrictor::GiftWrapScope::MissingRecipients)
         return "restricted: gift-wrap filters (kinds 1059/21059) must list their recipients in #p";
     if (!cfg().relay__auth__enabled || cfg().relay__auth__serviceUrl.empty())
         return "restricted: gift-wrap reads require relay AUTH support";
-    server.sendAuthChallenge(connId, server.ensureChallenge(rsctx, connId));
+    sendChallengeOnce(server, rsctx, connId);
     return "auth-required: gift wraps are readable only by their authenticated #p recipient";
 }
 
@@ -126,7 +139,7 @@ void RelayServer::runIngester(ThreadPool<MsgIngester>::Thread &thr) {
                 }
             } else if (auto msg = std::get_if<MsgIngester::NewConn>(&newMsg.msg)) {
                 if (readAdmission.enabled)
-                    sendAuthChallenge(msg->connId, ensureChallenge(rsctx, msg->connId));
+                    sendChallengeOnce(*this, rsctx, msg->connId);
             } else if (auto msg = std::get_if<MsgIngester::CloseConn>(&newMsg.msg)) {
                 auto connId = msg->connId;
 
@@ -152,7 +165,7 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
     if (readAdmission.enabled) {
         auto it = rsctx.connIdToAuthSession.find(connId);
         if (it == rsctx.connIdToAuthSession.end() || !it->second.isAuthed()) {
-            sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
+            sendChallengeOnce(*this, rsctx, connId);
             sendOKResponse(connId, origJson.optional<std::string>("id").value_or("?"), false, "auth-required: authenticate before publishing");
             return;
         }
@@ -209,12 +222,8 @@ void RelayServer::ingesterProcessEvent(lmdb::txn &txn, RelayServerCtx &rsctx, ui
 
             if (it == rsctx.connIdToAuthSession.end()) {
                 // we haven't sent an AUTH event for this, so first we generate a challenge for this connection
-                auto challenge = rsctx.challengeGenerator.get();
-                
-                rsctx.connIdToAuthSession.emplace(connId, challenge);
-
                 LI << "[" << connId << "] Protected event, requesting AUTH: " << idHex;
-                sendAuthChallenge(connId, challenge);
+                sendChallengeOnce(*this, rsctx, connId);
                 sendOKResponse(connId, idHex, false, "auth-required: event marked as protected");
                 return;
             }
@@ -290,7 +299,7 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
     bool isAuthed = hasSession && !it->second.authed.isNull();
     bool publicRead = readAdmission.enabled && readAdmission.isPublic(filterGroup);
     if (readAdmission.enabled && !publicRead && !isAuthed) {
-        sendAuthChallenge(connId, ensureChallenge(rsctx, connId));
+        sendChallengeOnce(*this, rsctx, connId);
         sendToConn(connId, tao::json::to_string(tao::json::value::array({
             "CLOSED", outSubIdStr, "auth-required: authenticate to read this relay"})));
         return;
@@ -327,16 +336,13 @@ void RelayServer::ingesterProcessReq(lmdb::txn &txn, RelayServerCtx &rsctx, uint
             return;
         }
         if (!hasSession) {
-            auto challenge = rsctx.challengeGenerator.get();
-            rsctx.connIdToAuthSession.emplace(connId, challenge);
             LI << "[" << connId << "] Requesting initial AUTH";
-            sendAuthChallenge(connId, challenge);
+            sendChallengeOnce(*this, rsctx, connId);
             sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, "auth-required: requested filter requires authentication"})));
         } else if (countOnly && isAuthed) {
             sendClosedError(connId, outSubIdStr, "count-failed: can only count events you are involved in");
         } else {
-            auto challenge = it->second.challengeSv();
-            sendAuthChallenge(connId, challenge);
+            sendChallengeOnce(*this, rsctx, connId);
             sendToConn(connId, tao::json::to_string(tao::json::value::array({"CLOSED", outSubIdStr, "auth-required: requested filter requires authentication"})));
         }
         return;
@@ -464,15 +470,8 @@ void RelayServer::ingesterProcessNegentropy(lmdb::txn &txn, RelayServerCtx &rsct
         // that means an unauthenticated client won't be able to see anything
         if (ReadRestrictor::isFilterGroupFullyRestricted(filter)) {
             if (!isAuthed) {
-                std::string challenge;
-                if (!hasSession) {
-                    challenge = rsctx.challengeGenerator.get();
-                    rsctx.connIdToAuthSession.emplace(connId, challenge);
-                    LI << "[" << connId << "] Requesting initial AUTH";
-                } else {
-                    challenge = it->second.challengeSv();
-                }
-                sendAuthChallenge(connId, challenge);
+                if (!hasSession) LI << "[" << connId << "] Requesting initial AUTH";
+                sendChallengeOnce(*this, rsctx, connId);
                 PROM_INC_RELAY_MSG("NEG-ERR");
                 sendToConn(connId, tao::json::to_string(tao::json::value::array({
                     "NEG-ERR",
