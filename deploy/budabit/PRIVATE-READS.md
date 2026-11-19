@@ -190,7 +190,8 @@ NIP-59 gift wraps (kinds `1059` and `21059`) are recipient-only, independently o
 connection authenticated as a pubkey in one of the event's `p` tags can read them.
 Their random outer author is never a reader. A filter that lists a gift-wrap kind
 must be `#p`-scoped to authenticated keys, otherwise the whole REQ/COUNT/NEG-OPEN is
-refused, with the AUTH challenge sent before `auth-required:`. This includes mixed
+refused with `auth-required:`. Each connection is sent its AUTH challenge once: on open
+in members mode, otherwise before the first refusal. This includes mixed
 ContextVM subscriptions (`25910`, `1059`, `21059`); unauthenticated clients no longer
 silently miss their gift wraps but must authenticate and resubscribe. With AUTH
 disabled/unconfigured, gift wraps are inaccessible, not public. See

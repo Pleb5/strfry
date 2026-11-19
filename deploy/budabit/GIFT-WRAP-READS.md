@@ -4,6 +4,39 @@ Requested by the operator on 2026-11-19 (DM `7012ac01…`): make gift-wrap retri
 `wss://relay.budabit.club` recipient-only. This is a source change. It has not been
 compiled, tested or deployed yet; see [Verification limits](#verification-limits).
 
+## Deployment readiness: not ready to roll out yet
+
+Roll out only when all of these hold:
+
+1. **Build from this branch's head, not `3dc14b48`.** At `3dc14b48` the relay could resend
+   the same AUTH challenge on one connection: once on open with read admission, then
+   again before an `auth-required:` refusal. Freedom Builders apps up to 257 reject a
+   repeated challenge, and the speech service `018b35c0` signs once per copy. The current
+   head sends each connection's challenge only once.
+2. **The live revision or image, and whether `feat/dm-rate-budget` is live, are known**
+   (see [Exact target needed](#exact-target-needed)).
+3. **If read admission is enabled on the live relay, wait for app 258.**
+   `relay.readPolicy.plugin` set, or NIP-11 `budabit.read_control` present, means read
+   admission is on. In that case every connection gets a challenge on open, so wait
+   until the phones in use run app 258 with `fd50846a`, which answers a reused challenge
+   once. With one challenge per connection, apps up to 257 should cope according to their
+   source, but that has not been observed.
+4. **The image is compiled and checked** with the commands below, with one real phone of
+   the installed app version, before the change is announced.
+
+Do **not** turn AUTH off to work around a client problem: with AUTH disabled, no gift
+wrap is readable by anyone. To undo, use the [rollback](#rollback).
+
+### AUTH versus read admission
+
+| Setting | Needed here? | Exact configuration | Effect |
+| --- | --- | --- | --- |
+| NIP-42 AUTH | **Required** | `relay.auth.enabled = true` and `relay.auth.serviceUrl = "wss://relay.budabit.club"`. NIP-11 lists 42 only when both are set. | Without it, gift-wrap filters get `restricted: gift-wrap reads require relay AUTH support`. |
+| Read admission ("members mode") | **Optional; independent of this change** | Enabled when `relay.readPolicy.plugin` is non-empty (preset `/usr/local/lib/strfry/read-policy.py` with `BUDABIT_READ_CONTROL=members`). Off when it is `""`, as in the committed template. | Challenges every connection on open and admits only members' non-public reads. Recipient-only gift wraps apply on top. |
+
+No configuration change is needed for this source change, and none was made on the live
+relay.
+
 ## Behaviour
 
 A gift wrap is delivered only to a connection that has authenticated with NIP-42 as a
@@ -28,7 +61,7 @@ Before any query runs, REQ, COUNT and NEG-OPEN filters are admitted as follows:
 | Filter | Relay response |
 | --- | --- |
 | Lists 1059 or 21059, and every `#p` value is authenticated on this connection | Admitted |
-| Lists 1059 or 21059, and some `#p` value is not authenticated (including no AUTH yet) | `["AUTH", <challenge>]`, then `["CLOSED", <id>, "auth-required: gift wraps are readable only by their authenticated #p recipient"]` (`NEG-ERR` for negentropy) |
+| Lists 1059 or 21059, and some `#p` value is not authenticated (including no AUTH yet) | `["AUTH", <challenge>]` if this connection has not been sent its challenge yet, then `["CLOSED", <id>, "auth-required: gift wraps are readable only by their authenticated #p recipient"]` (`NEG-ERR` for negentropy) |
 | Lists 1059 or 21059 without `#p` | `restricted: gift-wrap filters (kinds 1059/21059) must list their recipients in #p` (AUTH cannot fix this) |
 | Lists 1059 or 21059 on a relay without AUTH support | `restricted: gift-wrap reads require relay AUTH support` |
 | No `kinds` | Admitted unchanged; gift wraps are withheld per event unless the reader is a `p`-tag recipient |
@@ -41,10 +74,16 @@ ContextVM's `25910 + 1059 + 21059` would still silently miss live gift wraps. Th
 the failure behind 811f6ff. Clients that want public kinds without AUTH should request
 them in a separate REQ.
 
-**Challenge before `auth-required`.** The challenge and the refusal are queued in that
-order on the connection's single ordered output. Some clients only answer a challenge
-they have already received when the refusal arrives. These include the Freedom
-Builders phone ContextVM sessions and the laptop speech service checked below.
+**One challenge per connection.** NIP-42 makes a challenge valid for the whole
+connection, so the relay sends it at most once per connection:
+
+- on open when read admission is enabled;
+- otherwise immediately before the first `auth-required:` refusal, on the same ordered
+  output.
+
+Later refusals rely on the challenge the client already holds, and a client may AUTH
+several keys with it. This applies to every AUTH path, including kinds 4/4444, NIP-70
+and read admission. It changes neither AUTH verification nor the recipient checks.
 
 **Unchanged:**
 
@@ -82,10 +121,14 @@ Required client flow:
 1. Request gift wraps in their own REQ, scoped to the keys you will authenticate as, for
    example `{"kinds":[21059],"#p":["<own hex pubkey>"]}`. Keep public kinds in another
    REQ.
-2. Expect `["AUTH", <challenge>]` and then `["CLOSED", <id>, "auth-required: …"]`.
-3. Sign kind 22242 (`relay` = `wss://relay.budabit.club`, `challenge` = the string
-   received) with the recipient key, send `["AUTH", …]` and wait for `OK true`. Repeat
-   for each recipient key; this fork accepts up to 32 keys per connection.
+2. Expect `["CLOSED", <id>, "auth-required: …"]`. It is preceded by
+   `["AUTH", <challenge>]` only if this connection has not received its challenge yet; it
+   may have arrived on open (read admission) or before an earlier refusal. Keep the
+   challenge for the life of the connection, because the relay does not repeat it.
+3. Sign kind 22242 (`relay` = `wss://relay.budabit.club`, `challenge` = the stored
+   string) with the recipient key, send `["AUTH", …]` and wait for `OK true`. Use the same
+   challenge for each further recipient key; this fork accepts up to 32 keys per
+   connection.
 4. Resend the same REQ, then wait for EOSE before publishing anything whose reply must
    arrive on this connection. A reply published before the subscription is live can only
    be fetched while the relay still stores it: 1059 per retention, 21059 only for the
@@ -95,8 +138,9 @@ Checked in source only. None of these were run.
 
 | Client | Source | Expected result |
 | --- | --- | --- |
-| Freedom Builders laptop speech service (live per coordinator) | `018b35c0`, `rust/speech_server.rs:824-856` | Works. It subscribes to `[1059,21059]` with its own `#p`, answers the challenge with the service key, ignores `CLOSED` while its AUTH is pending, and resubscribes after `OK`. It would reconnect in a loop if `CLOSED` came first; this change prevents that. |
-| Freedom Builders phone ContextVM/DM sessions (app 251 native) | `0f1af06e`, `rust/network.rs` relay exchange | Works when the challenge comes first: it signs AUTH and resends the REQ after `OK`. It fails if `CLOSED` arrives before any challenge. It publishes before the authenticated re-REQ, so it relies on the relay still storing the reply. Later app versions were not inspected here. |
+| Freedom Builders laptop speech service (live per coordinator) | `018b35c0`, `rust/speech_server.rs:824-856` | Expected to work with **one** challenge per connection. It subscribes to `[1059,21059]` with its own `#p`, answers the challenge with the service key, ignores `CLOSED` while its AUTH is pending, and resubscribes after `OK`. It signs once per challenge copy and stops at a third (`auth_attempts<=2`, line 840). If `CLOSED` arrives before any challenge, it reconnects in a loop. |
+| Freedom Builders phone ContextVM and DM sessions, apps up to 257 (251 native read) | `0f1af06e`, `rust/network.rs:750-1100` | Expected to work with **one** challenge per connection: it signs AUTH and resends the REQ after `OK`. It **rejects any further challenge** after answering ("signer: invalid relay challenge", line 865). It also fails if `CLOSED` arrives before any challenge. It publishes before the authenticated re-REQ, so it relies on the relay still storing the reply. Versions 252-257 were not read here; the speech worker reports the same behaviour up to 257. |
+| Freedom Builders `fd50846a` (speech worker's final pin; unbuilt, planned app 258 and service) | `rust/network.rs`, `rust/speech_server.rs` | Answers a reused challenge once, ignores repeats and rejects a different one. Robust to either relay behaviour. |
 | Freedom Builders `feat/speech-ephemeral-transport` | `58b8af69` (uncompiled, per its worker) | Designed for this policy: 21059-only, own `#p`, AUTH as recipient or service, handles the challenge before or after the refusal, resubscribes, and gates publishing on EOSE (20 s). |
 | ContextVM TS SDK (`@contextvm/sdk` 0.14.3) | `src/relay/applesauce-relay-pool.ts`, `src/transport/base-nostr-transport.ts:126-136,553-566` at `3949fe3b` | **Breaks here.** The SDK's relay pool has no NIP-42 handling. Its default subscription is `#p` + `[25910, 1059, 21059]`; the wrap kinds follow the gift-wrap mode, not the encryption mode. Unless an application adds its own AUTH handling, default-configured TS-SDK clients and servers lose **all** ContextVM traffic on this relay, plaintext 25910 included, until they support AUTH or split their filters. |
 | ContextVM Rust SDK, Budabit web, other NIP-17 clients | — | Not verified. Budabit web's own `src` has no direct 1059 use (`9691ed871`); its vendored welshman packages were not inspected. |
@@ -176,8 +220,10 @@ nak req --auth --sec "<bunker URL of recipient A>" -k 1059 -p <A hex> -l 5 wss:/
 nak req --auth --sec "<bunker URL of A>" -k 1059 -p <B hex> -l 1 wss://relay.budabit.club            # still refused
 ```
 
-Then confirm on the phone that DMs and speech replies still arrive, and check the logs
-for `AUTHed as` lines and restarts.
+Then, with a phone running the installed app version (up to 257 until 258 ships),
+confirm that DMs and speech replies still arrive with no "invalid relay challenge"
+failure. Check that the laptop service log shows no AUTH error or reconnect loop, and
+that the relay log shows `AUTHed as` lines and no restarts.
 
 ### Rollback
 
@@ -188,7 +234,9 @@ gift wraps are publicly readable again, as before.
 
 ## Verification limits
 
-- **Not compiled.** A shared build-resource guard is in place and no slot was assigned.
+- **Not compiled.** This covers both the recipient-only policy and the
+  once-per-connection challenge. A shared build-resource guard is in place and no slot
+  was assigned.
 - **No tests.** No unit or integration tests were written or run, under the operator's
   testing policy. `test/tests/giftWrapReadTest.js` still asserts the 811f6ff public-read
   behaviour and will fail against this source; it was intentionally left unchanged.

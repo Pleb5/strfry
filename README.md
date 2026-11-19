@@ -25,7 +25,7 @@ always require an authenticated participant to read. NIP-59 gift wraps (kinds `1
 and `21059`) are readable only by an authenticated `p`-tag recipient, never by their
 random outer author, on stored, live, COUNT and negentropy paths; a filter that lists
 them must be `#p`-scoped to authenticated keys or the whole subscription is refused
-with an AUTH challenge followed by `auth-required:` (see
+with `auth-required:`. Each connection is sent its AUTH challenge once (see
 [gift-wrap reads](deploy/budabit/GIFT-WRAP-READS.md)). `relay.nip70.enabled` defaults to
 `false`: protection tags are preserved but their NIP-70 semantics are not enforced
 or advertised.

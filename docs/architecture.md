@@ -145,7 +145,8 @@ fork, kinds `4` and `4444` always require an authenticated author or valid
 `1059` and `21059`) always require an authenticated `p`-tag recipient; their random
 outer author is never a reader. Before a query starts, a filter that lists a gift-wrap
 kind must be `#p`-scoped to authenticated keys, otherwise the whole REQ, COUNT or
-NEG-OPEN is refused (challenge first, then `auth-required:`) instead of silently
+NEG-OPEN is refused with `auth-required:` (the connection's AUTH challenge is sent at
+most once, before the first refusal or on open with read admission) instead of silently
 withholding the gift wraps; kind-less filters are not refused and gift wraps are
 withheld per event. See [gift-wrap reads](../deploy/budabit/GIFT-WRAP-READS.md).
 Therefore EOSE plus fewer received events than the limit does not by itself prove
